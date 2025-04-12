@@ -1,0 +1,4 @@
+build/
+devel/
+src/parking_slot_detection/scripts/gcn-parking-slot/model/checkpoint_epoch_200.pth
+

@@ -1,0 +1,8 @@
+sensor_msgs/Image image   # 输入图像
+---
+float32[] corners_x1
+float32[] corners_x2
+float32[] corners_y1
+float32[] corners_y2
+string[] plate_numbers            # 车牌号码
+float32[] confidence_lic   #车牌置信度   

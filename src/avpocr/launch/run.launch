@@ -1,0 +1,10 @@
+<launch>
+    <node name="avpocr" pkg="showtrajectory" type="showtrajectory" output="screen" />
+    
+     <node pkg="avpocr" type="avpocr.py" name="avpocr"/>  
+      <!-- <node pkg="rosbag" type="play" name="playe" args="--clock  --rate 0.3 /home/user/download/地图数据/Close.bag --start 20 "/>   -->
+    <node pkg="rviz" type="rviz" name="rviz" output="screen" 
+      args="-d $(find showtrajectory)/rviz/showpath.rviz" required="true">
+    </node>
+
+</launch>

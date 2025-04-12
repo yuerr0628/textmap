@@ -1,0 +1,18 @@
+sensor_msgs/Image image_data
+---
+int32[] point0_x
+int32[] point0_y
+int32[] point1_x
+int32[] point1_y
+int32[] point2_x
+int32[] point2_y
+int32[] point3_x
+int32[] point3_y
+int32[] types
+int32[] label
+float32[] ocrpointx1
+float32[] ocrpointx2
+float32[] ocrpointy1
+float32[] ocrpointy2
+string[] texts
+float32[] confidence

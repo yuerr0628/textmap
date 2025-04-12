@@ -1,0 +1,14 @@
+<launch>
+    <!-- 启动service节点 -->
+    <node name="service_node" pkg="parking_slot_detection" type="gcn_server.py" output="screen" args="-c"></node>
+
+    <!-- 启动client节点 -->
+    <node name="client_node" pkg="parking_slot_detection" type="client_test_node" output="screen">
+        <!-- <param name="image_path" type="str" value="$(find parking_slot_detection)/data/test.jpg"/>
+    </node> -->
+     </node>
+    <node pkg="rosbag" type="play" name="playe" args="--clock  --rate 0.4 /data/yhy/Close.bag --start 15 "/> 
+         <!-- <node pkg="rviz" type="rviz" name="rviz" output="screen"   -->
+      <!-- args="-d $(find parking_slot_detection)/rviz/map.rviz" required="true">   -->
+      <!-- </node>    -->
+</launch>

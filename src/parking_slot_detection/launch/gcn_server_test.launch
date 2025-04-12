@@ -1,0 +1,14 @@
+<launch>
+    <!-- 启动service节点 -->
+    <node name="service_node1" pkg="parking_slot_detection" type="gcn_server.py" output="screen" args="-c"></node>
+    <node name="plate_recognition_server" pkg="parking_slot_detection" type="license_plate_recognition.py" output="screen" args="-c"></node>
+    <!-- 启动client节点 -->
+    <!-- <node name="client_node" pkg="parking_slot_detection" type="client_test.py" output="screen">
+        <param name="image_path" type="str" value="$(find parking_slot_detection)/data/test.png"/>
+    </node> -->
+    <node name="client_node" pkg="parking_slot_detection" type="client_test_node" output="screen">
+        <!-- <param name="image_path" type="str" value="$(find parking_slot_detection)/data/test.png"/> -->
+    </node>
+    <node pkg="rosbag" type="play" name="playe" args="--clock  --rate 1  /data/yhy/2025-03-23-13-52-47.bag  --start 15"/>  
+     <!-- </node> -->
+</launch>
