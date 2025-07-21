@@ -17,20 +17,20 @@ import pprint
 import numpy as np
 import math
 import random
-from sensor_msgs.msg import NavSatFix
+# from sensor_msgs.msg import NavSatFix
 # from cv_bridge import CvBridge
 from paddleocr import PaddleOCR
 from PIL import Image, ImageDraw, ImageFont
 import logging
-from std_msgs.msg import String
-from geometry_msgs.msg import Polygon, Point32
-from showtrajectory.msg import OCRResult
+# from std_msgs.msg import String
+# from geometry_msgs.msg import Polygon, Point32
+# from showtrajectory.msg import OCRResult
 # model
 from psdet.utils.config import get_config
 from psdet.utils.common import get_logger
 from psdet.models.builder import build_model
-from geometry_msgs.msg import Polygon, Point32
-from showtrajectory.msg import Slots
+# from geometry_msgs.msg import Polygon, Point32
+# from showtrajectory.msg import Slots
 from psdet.vps_detect.vps_classify import vpsClassify
 from psdet.utils.utils import compute_four_points
 
@@ -39,7 +39,7 @@ logging.disable(logging.WARNING)
 
 ocr = PaddleOCR(use_angle_cls=True)
 
-slot_pub = rospy.Publisher('slots', Slots, queue_size=1)
+# slot_pub = rospy.Publisher('slots', Slots, queue_size=1)
 # i=0
 class gcn_detector_server():
     def __init__(self):
@@ -96,7 +96,7 @@ class gcn_detector_server():
         h, w = image.shape[:2]
         center_x, center_y = w // 2, h // 2
         # crop_size =880
-        crop_size1=660
+        crop_size1=1024
 
         # # 裁剪图像
         cropped_image = image[center_y - crop_size1 // 2 : center_y + crop_size1 // 2,
@@ -112,7 +112,7 @@ class gcn_detector_server():
         Image1=self.imgmsg_to_cv2(req.image_data)
         # image3 = cv2.resize(cropped_image1, (512, 512))
         image3=cv2.resize(cropped_image, (512, 512))
-        result = ocr.ocr(image )
+        result = ocr.ocr(image)
         img_pil = Image.fromarray(image)
         draw = ImageDraw.Draw(img_pil)
       # 在图像上绘制识别结果
@@ -124,7 +124,7 @@ class gcn_detector_server():
         ocrpointy2 = []
         texts=[]
         confidence=[]
-        print(result)
+        # print(result)
         if result is not None:
             boxes = [line[0] for line in result]
             txts = [line[1][0] for line in result]
@@ -138,16 +138,16 @@ class gcn_detector_server():
                 y2 = box[2][1]
           # 创建带有置信度的文本
                 text_with_confidence = f"{text} ({score:.2f})"
-                ocrpointx1.append(x1-182)
-                ocrpointx2.append(x2-182)
-                ocrpointy1.append(y1-182)
-                ocrpointy2.append(y2-182)
+                ocrpointx1.append(x1)
+                ocrpointx2.append(x2)
+                ocrpointy1.append(y1)
+                ocrpointy2.append(y2)
                 texts.append(text)
                 # print(score)
                 confidence.append(score)
           # 设置坐标范围
-                x_min, x_max = 182, 842
-                y_min, y_max = 182, 842
+                # x_min, x_max = 182, 842
+                # y_min, y_max = 182, 842
 
                 # # 检查坐标是否在指定范围内
                 # if x_min <= x1 <= x_max and x_min <= x2 <= x_max and y_min <= y1 <= y_max and y_min <= y2 <= y_max:
@@ -196,17 +196,17 @@ class gcn_detector_server():
                 p2_y = p0_y - self.input_image_size[1] * separating_length * vec[0]
                 p3_x = p1_x + self.input_image_size[0] * separating_length * vec[1]
                 p3_y = p1_y - self.input_image_size[1] * separating_length * vec[0]
-                slot = Slots()
-              # 创建 Header 对象，设置时间戳和其他字段
-          # text_with_box.stamp=gps_1
-                slot.polygon.points = [
-                  Point32(x=p0_x/108, y=p0_y/108),
-                  Point32(x=p1_x/108, y=p1_y/108),
-                  Point32(x=p2_x/108, y=p2_y/108),
-                  Point32(x=p3_x/108, y=p3_x/108)
-              ]
-                # slot.ID=i
-                slot_pub.publish(slot)
+        #         slot = Slots()
+        #       # 创建 Header 对象，设置时间戳和其他字段
+        #   # text_with_box.stamp=gps_1
+        #         slot.polygon.points = [
+        #           Point32(x=p0_x/108, y=p0_y/108),
+        #           Point32(x=p1_x/108, y=p1_y/108),
+        #           Point32(x=p2_x/108, y=p2_y/108),
+        #           Point32(x=p3_x/108, y=p3_x/108)
+        #       ]
+        #         # slot.ID=i
+        #         slot_pub.publish(slot)
                 p0_x = int(round(p0_x))
                 p0_y = int(round(p0_y))
                 p1_x = int(round(p1_x))

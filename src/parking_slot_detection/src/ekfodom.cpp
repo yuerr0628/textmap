@@ -3,6 +3,7 @@
 #include "rvizshow.h"
 #include "loop_closing.h"
 
+
 #define IF_WS_ERROR 0
 #define IF_IMU_MOUNT_ERROR 0
 
@@ -19,6 +20,7 @@ Eigen::Matrix4d intial1 = Eigen::Matrix4d::Identity();
 Eigen::Matrix4d curr1 =intial1;
 std::vector<Eigen::Vector2d> deny_time = {Eigen::Vector2d(80, 100), Eigen::Vector2d(120, 190), Eigen::Vector2d(220, 240)};
 
+
 // Odometry::Odometry() {
 //     ROS_WARN("Odometry initialized without NodeHandle. Some functionality may be limited.");
 // }
@@ -31,6 +33,10 @@ Odometry::Odometry(ros::NodeHandle& nh):pose1(nh) {
     // gps_sub_odom= nh.subscribe("/Inertial/gps/fix", 10, &Odometry::GpsCallback, this);
     avmimage_sub = nh.subscribe("/driver/fisheye/avm/compressed", 10, &Odometry::avm_callback,this);
     frontimage_sub = nh.subscribe("/driver/fisheye/front/compressed", 10, &Odometry::front_callback,this);
+    m_front_cam_sub = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(nh, "/driver/fisheye/front/compressed", 50);
+    m_Imu_sub = std::make_unique<message_filters::Subscriber<sensor_msgs::Imu>>(nh, "/Inertial/imu/data", 50);
+    m_synchronizer = std::make_unique<message_filters::Synchronizer<ImuFrontSyncPolicy>>(ImuFrontSyncPolicy(10), *m_front_cam_sub, *m_Imu_sub );
+    m_synchronizer->registerCallback(boost::bind(&Odometry::syncedCallback, this, _1, _2));
     
     client = nh.serviceClient<parking_slot_detection::gcn_parking>("gcn_service");
     client_plate = nh.serviceClient<parking_slot_detection::PlateRecognition>("license_plate_recognition");
@@ -45,7 +51,7 @@ Odometry::Odometry(ros::NodeHandle& nh):pose1(nh) {
     nh.param<double>("acc_bias_noise", acc_rw_var, 1e-7);
     nh.param<double>("gyr_bias_noise", gyr_rw_var, 1e-8);
     nh.param<double>("imu_mount_rw_var", imu_mount_rw_var, 1e-6);
-    nh.param<double>("whl_odom_var", whl_odom_var, 5);
+    nh.param<double>("whl_odom_var", whl_odom_var, 1);
     // nh.param<double>("odometry_var",odom_var,1);
     nh.param<double>("odometry_rot_var",odom_rot_var,100);
     nh.param<double>("odometry_tran_var",odom_tran_var,100);
@@ -54,7 +60,7 @@ Odometry::Odometry(ros::NodeHandle& nh):pose1(nh) {
     Eigen::Matrix3d R_I = Eigen::Matrix3d::Identity();
     state_.R_q = R_I;
     state_.p.setZero();
-    state_.p={-8.671878,-10.913547,0};
+    // state_.p={-8.671878,-10.913547,0};
     
     state_.v.setZero();
     state_.ba.setZero();
@@ -64,8 +70,8 @@ Odometry::Odometry(ros::NodeHandle& nh):pose1(nh) {
     
     // 将四元数转换为 Eigen 四元数
     // Eigen::Quaterniond eigen_q(q.w(), q.x(), q.y(), q.z());
-    double theta=23 * M_PI / 180.0;
-    // double theta=55 * M_PI / 180.0;
+    // double theta=90 * M_PI / 180.0;
+    double theta=55 * M_PI / 180.0;
     // // 转换为旋转矩阵
     Eigen::Matrix3d rotation_matrix;
    rotation_matrix << cos(theta), -sin(theta), 0,
@@ -74,7 +80,7 @@ Odometry::Odometry(ros::NodeHandle& nh):pose1(nh) {
 
     // 0.000269 0.000936 -0.468098 0.883676
     state_.R_imu = R_I;
-    state_.R_q = rotation_matrix;
+    // state_.R_q = rotation_matrix;
     state_.ws = 1.0;
 
     state_.P = Eigen::MatrixXd::Zero(StateIndex::STATE_TOTAL, StateIndex::STATE_TOTAL);
@@ -116,18 +122,18 @@ void Odometry::avm_callback(const sensor_msgs::CompressedImageConstPtr& msg) {
      cout<<avmseq1<<endl;
     avm_buffer1[avmseq1] = msg;          // 将消息存入缓冲区
 
-    // 检查是否有匹配的 front 图像
-    if (front_buffer1.count(avmseq1)) {
-        // 找到匹配的 front 图像
-        auto front_msg = front_buffer1[avmseq1];
+    // // 检查是否有匹配的 front 图像
+    // if (front_buffer1.count(avmseq1)) {
+    //     // 找到匹配的 front 图像
+    //     auto front_msg = front_buffer1[avmseq1];
 
-        // 移除已匹配的消息
-        front_buffer1.erase(avmseq1);
-        avm_buffer1.erase(avmseq1);
+    //     // 移除已匹配的消息
+    //     front_buffer1.erase(avmseq1);
+    //     avm_buffer1.erase(avmseq1);
 
-        // 触发后续处理逻辑
-        process_synced_images(msg, front_msg);
-    }
+    //     // 触发后续处理逻辑
+    //     process_synced_images(msg, front_msg);
+    // }
 }
 
 void Odometry::front_callback(const sensor_msgs::CompressedImageConstPtr& msg) {
@@ -136,7 +142,22 @@ void Odometry::front_callback(const sensor_msgs::CompressedImageConstPtr& msg) {
      cout<<frontseq1<<endl;
     front_buffer1[frontseq1] = msg;        // 将消息存入缓冲区
 
-    // 检查是否有匹配的 AVM 图像
+    // // 检查是否有匹配的 AVM 图像
+    // if (avm_buffer1.count(frontseq1)) {
+    //     // 找到匹配的 AVM 图像
+    //     auto avm_msg = avm_buffer1[frontseq1];
+
+    //     // 移除已匹配的消息
+    //     avm_buffer1.erase(frontseq1);
+    //     front_buffer1.erase(frontseq1);
+
+    //     // 触发后续处理逻辑
+    //     process_synced_images(avm_msg, msg);
+    // }
+}
+
+void Odometry::syncedCallback(const sensor_msgs::CompressedImageConstPtr& front_cam_msg, const sensor_msgs::ImuConstPtr& imu_msg) {
+       // 检查是否有匹配的 AVM 图像
     if (avm_buffer1.count(frontseq1)) {
         // 找到匹配的 AVM 图像
         auto avm_msg = avm_buffer1[frontseq1];
@@ -146,7 +167,12 @@ void Odometry::front_callback(const sensor_msgs::CompressedImageConstPtr& msg) {
         front_buffer1.erase(frontseq1);
 
         // 触发后续处理逻辑
-        process_synced_images(avm_msg, msg);
+        process_synced_images(avm_msg, front_cam_msg);
+    }
+    else {
+        // 未找到匹配的AVM，可能AVM消息还没到或者丢失了
+        // ROS_WARN("No matching AVM image for front_cam_seq %lu");
+        cout<<"No matching AVM image for front_cam_seq"<<endl;
     }
 }
 
@@ -241,16 +267,16 @@ bool Odometry::process_IMU_Data(IMUDataPtr imu_data_ptr)
     return true;
 }
 
-void Odometry::drawline(const Eigen::Matrix4d&Rpose)
+void Odometry::drawline(const VIOODOMData & Rpose)
 {
      
     //             // 更新当前帧的全局位姿
     // curr1 = curr1 * Rpose;
     // 提取当前帧的平移向量
-    Eigen::Vector3d position = Rpose.block<3, 1>(0, 3);
+    // Eigen::Vector3d position = Rpose.block<3, 1>(0, 3);
     // 将当前帧的位置添加到轨迹中
-    trajectory.push_back(position);
-    // odomdisplay.publishodomPath(position);
+    // trajectory.push_back(position);
+    odomdisplay.publishodomPath(Rpose);
 }
 
 
@@ -458,7 +484,7 @@ void Odometry::UpdateByOdom(VIOODOMDataPtr odom_data_ptr)
     {
         state_.ba += dx.segment<3>(StateIndex::BA); // 3
         state_.bg += dx.segment<3>(StateIndex::BG); // 3
-        // std::cout<<"ba bg: "<<state_.ba.transpose()<<" "<<state_.bg.transpose()<<std::endl;
+        std::cout<<"ba bg: "<<state_.ba.transpose()<<" "<<state_.bg.transpose()<<std::endl;
         if (IF_IMU_MOUNT_ERROR && dx.block<3, 1>(StateIndex::IMU_INSTALL_ANGLE, 0).norm() > DBL_EPSILON)
         {
             state_.R_imu *= v_expmap(dx.block<3, 1>(StateIndex::IMU_INSTALL_ANGLE, 0));
@@ -607,33 +633,20 @@ std::cout<<prevPoints.size()<<std::endl;
 
         // 3. 更新当前点云位置
         // 应用当前的R和t到prevPoints上，生成新的currPoints（待更新的当前点集）
-        for (size_t i = 0; i < prevPoints.size(); ++i) {
-            prevPoints[i] = R * prevPoints[i] + t; // 更新点
-        }
-
-        // 4. 判断收敛
-            // 计算质心变化的范数
-        // double centroidChangeNorm = t.norm();
-        // if (centroidChangeNorm < threshold) {
-        //     std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
-        //  } 
-        //  else {
-        //     std::cout << "ICP is still converging. Centroid change: " << centroidChangeNorm << std::endl;
-        // }
-                // Update R and t
-        // R = Rk * R;
-        // t = Rk * t + tk;
-        vpose.R=preR*R;
-        vpose.t=preR*t+prevt;
-        double centroidChangeNorm = (t).norm();
-        if (centroidChangeNorm < convergenceThreshold) {
-            // std::cout << "centroidChangeNorm " <<centroidChangeNorm<< std::endl;
-            break;
-        }
-        else{
-            //  std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
-            //    std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
-        }
+            for (size_t i = 0; i < prevPoints.size(); ++i) {
+                prevPoints[i] = R * prevPoints[i] + t; // 更新点
+            }
+            vpose.R=preR*R;
+            vpose.t=preR*t+prevt;
+            double centroidChangeNorm = (t).norm();
+            if (centroidChangeNorm < convergenceThreshold) {
+                // std::cout << "centroidChangeNorm " <<centroidChangeNorm<< std::endl;
+                break;
+            }
+            else{
+                //  std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
+                //    std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
+            }
     }
     // computeTransformation(prevPoints, currPoints, R, t);
 
@@ -661,7 +674,7 @@ std::cout<<prevPoints.size()<<std::endl;
     }
     // std::cout<<state_.p<<std::endl;
     current_pose = current_pose * pose;
-    Eigen::Vector3d position = current_pose.block<3, 1>(0, 3);
+    Eigen::Vector3d position = pose.block<3, 1>(0, 3);
     // vpose.t=current_pose.block<3, 1>(0, 3);
     // vpose.R=current_pose.block<3, 3>(0, 0);
     viodata.pose.position.x = position(0);
@@ -669,18 +682,23 @@ std::cout<<prevPoints.size()<<std::endl;
     viodata.pose.position.z = position(2);
 
     // 提取旋转矩阵并转换为四元数
-    Eigen::Quaterniond quaternion(current_pose.block<3, 3>(0, 0));
+    Eigen::Quaterniond quaternion(pose.block<3, 3>(0, 0));
     viodata.pose.orientation.w = quaternion.w();
     viodata.pose.orientation.x = quaternion.x();
     viodata.pose.orientation.y = quaternion.y();
     viodata.pose.orientation.z = quaternion.z();
     viodata.timestamp=cdata.timestamp;
+     drawline(viodata);
     if(!odom_need_init)
-    {vio_process( viodata);}
+    {
+        double centroidChanget = (vpose.t).norm();
+        vio_process( viodata);
+       
+    }
     pose.block<3, 3>(0, 0) = current_pose.block<3, 3>(0, 0);
     pose.block<3, 1>(0, 3) = current_pose.block<3, 1>(0, 3);
-    drawline(pose);
-    Eigen::MatrixXd Q1= Eigen::MatrixXd::Identity(6, 6) * 0.01;
+   
+    // Eigen::MatrixXd Q1= Eigen::MatrixXd::Identity(6, 6) * 0.01;
     // ekfloop.predict(vpose.t,quaternion,Q1);
     // update(pose);
     // ekfodometry(state_);
@@ -1016,57 +1034,57 @@ void Odometry::process_synced_images(const sensor_msgs::CompressedImageConstPtr&
         for (size_t i = 0; i < srv.response.point0_x.size(); ++i){
         // std::cout<<"x0:"<<-256+srv.response.point0_x[i]<<","<<-256+srv.response.point0_y[i]<<std::endl;
         //  std::cout<<"x1:"<<-256+srv.response.point1_x[i]<<","<<-256+srv.response.point1_y[i]<<std::endl;
-            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point0_x[i])/50.08, (-256+srv.response.point0_y[i])/48.99,0));
-            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point1_x[i])/50.08, (-256+srv.response.point1_y[i])/48.99,0));
-            //  currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point2_x[i])/50.08, (-256+srv.response.point2_y[i])/48.99,0));
-            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point3_x[i])/50.08, (-256+srv.response.point3_y[i])/48.99,0));
+            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point0_x[i])/55.52, (-256+srv.response.point0_y[i])/54.94,0));
+            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point1_x[i])/55.52, (-256+srv.response.point1_y[i])/54.94,0));
+            //  currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point2_x[i])/55.52, (-256+srv.response.point2_y[i])/54.94,0));
+            // currvehiclePoints.push_back(Eigen::Vector3d(-(-256+srv.response.point3_x[i])/55.52, (-256+srv.response.point3_y[i])/54.94,0));
             //  std::cout<<"spot"<<-256+srv.response.point0_y[i]<<","<<-256+srv.response.point3_y[i]<<std::endl;
             
-            double dis=(abs(srv.response.point3_x[i]-srv.response.point1_x[i]))/50.08;
-            // std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point3_y[i])/48.99<<std::endl;
-            //    std::cout<<"length:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/50.08<<std::endl;
-            //      std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/48.99<<std::endl;
-            double dis1=(abs(srv.response.point1_y[i]-srv.response.point0_y[i]))/48.99;
+            double dis=(abs(srv.response.point3_x[i]-srv.response.point1_x[i]))/55.52;
+            // std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point3_y[i])/54.94<<std::endl;
+            //    std::cout<<"length:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/55.52<<std::endl;
+            //      std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/54.94<<std::endl;
+            double dis1=(abs(srv.response.point1_y[i]-srv.response.point0_y[i]))/54.94;
             // std::cout<<"dis:"<<dis<<",dis1:"<<dis1<<std::endl;
             if(dis1>=1.5&&dis>3.8){
             Spot nspots;
-            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point0_y[i])/48.99, -(-256+srv.response.point0_x[i])/50.08,0));
-            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point1_y[i])/48.99, -(-256+srv.response.point1_x[i])/50.08,0));
-            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point2_y[i])/48.99, -(-256+srv.response.point2_x[i])/50.08,0));
-            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point3_y[i])/48.99, -(-256+srv.response.point3_x[i])/50.08,0));
-            //      nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point0_x[i])/50.08, -(-256+srv.response.point0_y[i])/48.99,0));
-            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point1_x[i])/50.08, -(-256+srv.response.point1_y[i])/48.99,0));
-            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point2_x[i])/50.08, -(-256+srv.response.point2_y[i])/48.99,0));
-            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point3_x[i])/50.08, -(-256+srv.response.point3_y[i])/48.99,0));
+            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point0_y[i])/54.94, -(-256+srv.response.point0_x[i])/55.52,0));
+            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point1_y[i])/54.94, -(-256+srv.response.point1_x[i])/55.52,0));
+            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point2_y[i])/54.94, -(-256+srv.response.point2_x[i])/55.52,0));
+            nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point3_y[i])/54.94, -(-256+srv.response.point3_x[i])/55.52,0));
+            //      nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point0_x[i])/55.52, -(-256+srv.response.point0_y[i])/54.94,0));
+            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point1_x[i])/55.52, -(-256+srv.response.point1_y[i])/54.94,0));
+            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point2_x[i])/55.52, -(-256+srv.response.point2_y[i])/54.94,0));
+            // nspots.corners.push_back(Eigen::Vector3d((-256+srv.response.point3_x[i])/55.52, -(-256+srv.response.point3_y[i])/54.94,0));
             textdata.spots.push_back(nspots);
             nspots.corners.clear();
             // cout<<textdata.spots.size()<<endl;
-            //       currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point0_x[i])/50.08, -(-256+srv.response.point0_y[i])/48.99,0));
-            // currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point1_x[i])/50.08, -(-256+srv.response.point1_y[i])/48.99,0));
-            //  currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point2_x[i])/50.08, -(-256+srv.response.point2_y[i])/48.99,0));
-            // currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point3_x[i])/50.08, -(-256+srv.response.point3_y[i])/48.99,0));
+            //       currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point0_x[i])/55.52, -(-256+srv.response.point0_y[i])/54.94,0));
+            // currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point1_x[i])/55.52, -(-256+srv.response.point1_y[i])/54.94,0));
+            //  currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point2_x[i])/55.52, -(-256+srv.response.point2_y[i])/54.94,0));
+            // currvehiclePoints.push_back(Eigen::Vector3d((-256+srv.response.point3_x[i])/55.52, -(-256+srv.response.point3_y[i])/54.94,0));
             }
         //    std::cout<<"2"<<std::endl;
         }
         for (size_t j = 0; j < srv.response.ocrpointx1.size(); ++j){
-            // std::cout<<srv.response.texts[j]<<":"<<(-330+srv.response.ocrpointy1[j])/63.15<<std::endl;
-            // std::cout<<srv.response.texts[j]<<":"<<(-330+srv.response.ocrpointx1[j])/64.56<<std::endl;
+            // std::cout<<srv.response.texts[j]<<":"<<(-512+srv.response.ocrpointy1[j])/109.88<<std::endl;
+            // std::cout<<srv.response.texts[j]<<":"<<(-512+srv.response.ocrpointx1[j])/111.04<<std::endl;
             // std::cout<<srv.response.texts[j]<<std::endl;
             OCRtext ocrtext;
-            // textdata.ocrPoints.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-256+srv.response.ocrpointx1[j])/50.08, -(-256+srv.response.ocrpointy1[j])/48.99,0)});
-            // textdata.ocrPoints.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-256+srv.response.ocrpointx2[j])/50.08, -(-256+srv.response.ocrpointy2[j])/48.99,0)});
-            ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-330+srv.response.ocrpointy1[j])/63.15, -(-330+srv.response.ocrpointx1[j])/64.56,0)});
-            ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-330+srv.response.ocrpointy2[j])/63.15, -(-330+srv.response.ocrpointx2[j])/64.56,0)});
-            // ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-330+srv.response.ocrpointx1[j])/64.56, -(-330+srv.response.ocrpointy1[j])/63.15,0)});
-            // ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-330+srv.response.ocrpointx2[j])/64.56, -(-330+srv.response.ocrpointy2[j])/63.15,0)});
-            // std::cout<<srv.response.texts[j]<<":"<<(-256+srv.response.ocrpointx2[j])/63.15<<","<<(-256+srv.response.ocrpointy2[j])/64.56<<std::endl;
-            // std::cout<<srv.response.texts[j]<<":"<<(-256+srv.response.ocrpointx1[j])/63.15<<","<<(-256+srv.response.ocrpointy1[j])/64.56<<std::endl;
-            // currvehiclePoints_ocr.push_back(Eigen::Vector3d((-256+srv.response.ocrpointx1[j])/50.08, -(-256+srv.response.ocrpointy1[j])/48.99,0));
-            // currvehiclePoints_ocr.push_back(Eigen::Vector3d((-256+srv.response.ocrpointx2[j])/50.08, -(-256+srv.response.ocrpointy2[j])/48.99,0));
-            ocrtext.textcorners.push_back(Eigen::Vector3d((-330+srv.response.ocrpointy1[j])/63.15,-(-330+srv.response.ocrpointx1[j])/64.56,0));
-            ocrtext.textcorners.push_back(Eigen::Vector3d((-330+srv.response.ocrpointy2[j])/63.15, -(-330+srv.response.ocrpointx2[j])/64.56,0));
-            // ocrtext.textcorners.push_back(Eigen::Vector3d((-330+srv.response.ocrpointx1[j])/64.56, -(-330+srv.response.ocrpointy1[j])/63.15,0));
-            // ocrtext.textcorners.push_back(Eigen::Vector3d((-330+srv.response.ocrpointx2[j])/64.56, -(-330+srv.response.ocrpointy2[j])/63.15,0));
+            // textdata.ocrPoints.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-256+srv.response.ocrpointx1[j])/55.52, -(-256+srv.response.ocrpointy1[j])/54.94,0)});
+            // textdata.ocrPoints.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-256+srv.response.ocrpointx2[j])/55.52, -(-256+srv.response.ocrpointy2[j])/54.94,0)});
+            ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-512+srv.response.ocrpointy1[j])/109.88, -(-512+srv.response.ocrpointx1[j])/111.04,0)});
+            ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-512+srv.response.ocrpointy2[j])/109.88, -(-512+srv.response.ocrpointx2[j])/111.04,0)});
+            // ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-512+srv.response.ocrpointx1[j])/111.04, -(-512+srv.response.ocrpointy1[j])/109.88,0)});
+            // ocrtext.ocrdata.push_back({srv.response.texts[j],Eigen::Vector3d((-512+srv.response.ocrpointx2[j])/111.04, -(-512+srv.response.ocrpointy2[j])/109.88,0)});
+            // std::cout<<srv.response.texts[j]<<":"<<(-256+srv.response.ocrpointx2[j])/109.88<<","<<(-256+srv.response.ocrpointy2[j])/111.04<<std::endl;
+            // std::cout<<srv.response.texts[j]<<":"<<(-256+srv.response.ocrpointx1[j])/109.88<<","<<(-256+srv.response.ocrpointy1[j])/111.04<<std::endl;
+            // currvehiclePoints_ocr.push_back(Eigen::Vector3d((-256+srv.response.ocrpointx1[j])/55.52, -(-256+srv.response.ocrpointy1[j])/54.94,0));
+            // currvehiclePoints_ocr.push_back(Eigen::Vector3d((-256+srv.response.ocrpointx2[j])/55.52, -(-256+srv.response.ocrpointy2[j])/54.94,0));
+            ocrtext.textcorners.push_back(Eigen::Vector3d((-512+srv.response.ocrpointy1[j])/109.88,-(-512+srv.response.ocrpointx1[j])/111.04,0));
+            ocrtext.textcorners.push_back(Eigen::Vector3d((-512+srv.response.ocrpointy2[j])/109.88, -(-512+srv.response.ocrpointx2[j])/111.04,0));
+            // ocrtext.textcorners.push_back(Eigen::Vector3d((-512+srv.response.ocrpointx1[j])/111.04, -(-512+srv.response.ocrpointy1[j])/109.88,0));
+            // ocrtext.textcorners.push_back(Eigen::Vector3d((-512+srv.response.ocrpointx2[j])/111.04, -(-512+srv.response.ocrpointy2[j])/109.88,0));
             textdata.ocrPoints.push_back(ocrtext);
             ocrtext.textcorners.clear();
         }
@@ -1140,7 +1158,7 @@ void Odometry::imuCallback_odom(const sensor_msgs::ImuConstPtr &imu_msg)
         stateInit_ = true;
     }
     
-    publish();
+    publish_odo();
 
 }
 
@@ -1150,7 +1168,7 @@ void Odometry::WheelCallback(const parking_slot_detection::SpeedFeedbackConstPtr
     // std::cout << "[ ESKF ] Wheel data." << std::endl;
     if (!IF_USE_WHL)
     {
-        // std::cout<<"[ ESKF ] Wheel data."<<std::endl;
+        std::cout<<"[ ESKF ] Wheel data."<<std::endl;
         return;
     }
     // ROS_INFO("step 1 ");
@@ -1373,7 +1391,7 @@ bool ekf_need_init = true;
    
 }
 
-void Odometry::publish()
+void Odometry::publish_odo()
 {
     // std::cout<<"display"<<std::endl;
      odomdisplay.publishekfodom_new(state_);

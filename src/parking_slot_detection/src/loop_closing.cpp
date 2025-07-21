@@ -21,6 +21,7 @@ LoopClosing::LoopClosing(ros::NodeHandle& nh,const std::string& filename):ekfodo
      avmimage_sub1 = nh.subscribe("/driver/fisheye/avm/compressed", 10, &LoopClosing::avm_callback1,this);
     frontimage_sub1= nh.subscribe("/driver/fisheye/front/compressed", 10, &LoopClosing::front_callback1,this);
     client = nh.serviceClient<parking_slot_detection::gcn_parking>("gcn_service");
+    global_pose_publisher_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("/global_pose", 5);
         // 过程噪声和测量噪声
      Q = Eigen::MatrixXd::Identity(6, 6) * 0.01;
      R1 = Eigen::MatrixXd::Identity(6, 6) * 0.05;
@@ -32,11 +33,11 @@ void LoopClosing::loadMap(const std::string& filename) {
     for (const auto& node : data) {
         AssociatedPair pair;
         pair.ID = node["ID"].as<int>();
-        pair.unmatch_ID = node["unmatch_ID"].as<int>();
-        pair.age = node["age"].as<int>();
-        pair.distanceocr = node["distanceocr"].as<double>();
-        pair.IF_TEXT_DET = node["IF_TEXT_DET"].as<bool>();
-        pair.IF_SPOT_DET = node["IF_SPOT_DET"].as<bool>();
+        // pair.unmatch_ID = node["unmatch_ID"].as<int>();
+        // pair.age = node["age"].as<int>();
+        // pair.distanceocr = node["distanceocr"].as<double>();
+        // pair.IF_TEXT_DET = node["IF_TEXT_DET"].as<bool>();
+        // pair.IF_SPOT_DET = node["IF_SPOT_DET"].as<bool>();
 
     // 解析ParkingSpot
         pair.spot.x1 = node["ParkingSpot"]["x1"].as<double>();
@@ -48,19 +49,19 @@ void LoopClosing::loadMap(const std::string& filename) {
         pair.spot.x4 = node["ParkingSpot"]["x4"].as<double>();
         pair.spot.y4 = node["ParkingSpot"]["y4"].as<double>();
         pair.spot.vacant = node["ParkingSpot"]["vacant"].as<int>();
-        pair.spot.vacant = node["ParkingSpot"]["vacant"].as<int>();
-        pair.spot.vacant_update = node["ParkingSpot"]["vacant_update"].as<int>();
+        // pair.spot.vacant = node["ParkingSpot"]["vacant"].as<int>();
+        // pair.spot.vacant_update = node["ParkingSpot"]["vacant_update"].as<int>();
 
     // 解析OCRPoint
         pair.ocrPoint.text = node["OCRPoint"]["text"].as<std::string>();
-        pair.ocrPoint.confidence = node["OCRPoint"]["confidence"].as<double>();
+        // pair.ocrPoint.confidence = node["OCRPoint"]["confidence"].as<double>();
         pair.ocrPoint.x1 = node["OCRPoint"]["x1"].as<double>();
         pair.ocrPoint.y1 = node["OCRPoint"]["y1"].as<double>();
         pair.ocrPoint.x2 = node["OCRPoint"]["x2"].as<double>();
         pair.ocrPoint.y2 = node["OCRPoint"]["y2"].as<double>();
         
-        pair.ocrPoint.text = node["OCRPoint"]["text"].as<std::string>();
-        pair.ocrPoint.confidence = node["OCRPoint"]["confidence"].as<double>();
+        // pair.ocrPoint.text = node["OCRPoint"]["text"].as<std::string>();
+        // pair.ocrPoint.confidence = node["OCRPoint"]["confidence"].as<double>();
         
 
         // mapdisplay.visualizeMapPoints(pair);
@@ -206,10 +207,10 @@ std::vector<AssociatedPair> LoopClosing::getMapPoints() const {
 //icp计算pose
 Eigen::Matrix4d LoopClosing::icp_pose(std::vector<Eigen::Vector3d>  prevPoints,const std::vector<Eigen::Vector3d>  currPoints)
 {
-    if(!intialloop)
-    {
-        predict(ekfodom.state_.p,Eigen::Quaterniond (ekfodom.state_.R_q),Q);
-    }
+    // if(!intialloop)
+    // {
+    //     predict(ekfodom.state_.p,Eigen::Quaterniond (ekfodom.state_.R_q),Q);
+    // }
 
         if (prevPoints.size() != currPoints.size() || prevPoints.size() < 3) {
         // std::cout << "Error: Point cloud size mismatch or insufficient points." << std::endl;
@@ -242,50 +243,91 @@ Eigen::Matrix4d LoopClosing::icp_pose(std::vector<Eigen::Vector3d>  prevPoints,c
         }
         pose_loop.R=preR*R;
         pose_loop.t=preR*t+prevt;
-        // 4. 判断收敛
-            // 计算质心变化的范数
-        // double centroidChangeNorm = t.norm();
-        // if (centroidChangeNorm < threshold) {
-        //     std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
-        //  } 
-        //  else {
-        //     std::cout << "ICP is still converging. Centroid change: " << centroidChangeNorm << std::endl;
-        // }
-        double centroidChangeNorm = (t).norm();
+
+         double centroidChangeNorm = (t).norm();
         if (centroidChangeNorm < convergenceThreshold) {
-            // std::cout << "ICP has converged in " << centroidChangeNorm<< std::endl;
+            // std::cout << "centroidChangeNorm " <<centroidChangeNorm<< std::endl;
             break;
         }
-        else{
-            //  std::cout << "ICP has converged." <<centroidChangeNorm<<std::endl;
-        }
     }
-    // computeTransformation(prevPoints, currPoints, R, t);
-
-    // t=prevt;
-    // R=preR;
 
     Eigen::Matrix4d pose = Eigen::Matrix4d::Identity();
     
     pose.block<3, 3>(0, 0) = pose_loop.R;
     pose.block<3, 1>(0, 3) = pose_loop.t;
-    if(intialloop)
-        {
-            // intialloop=false;
+    // if(intialloop)
+    //     {
+    //         // intialloop=false;
             
-            initializeEKF(ekf);
-            noimage=1;
-        }
+    //         initializeEKF(ekf);
+    //         noimage=1;
+    //     }
 
-    double yaw_loop = std::atan2(pose_loop.R(1, 0), pose_loop.R(0, 0));
-    // cout<<"yaw_dect:"<<yaw_loop<<endl;
+    // double yaw_loop = std::atan2(pose_loop.R(1, 0), pose_loop.R(0, 0));
+    // // cout<<"yaw_dect:"<<yaw_loop<<endl;
     
-    // ekfodom.vpose
-    update(pose_loop.t,Eigen::Quaterniond (pose_loop.R),R1);
+    // // ekfodom.vpose
+    // update(pose_loop.t,Eigen::Quaterniond (pose_loop.R),R1);
     
     // mapdisplay.publishodomPath(pose_loop.t);
-    ekf.position=pose_loop.t;
-    ekf.orientation=Eigen::Quaterniond (pose_loop.R);
+    // ekf.position=pose_loop.t;
+    // ekf.orientation=Eigen::Quaterniond (pose_loop.R);
+     global_state.position=pose_loop.t;
+     
+
+    global_state.orientation=Eigen::Quaterniond (pose_loop.R);
+      // --- 核心修正步骤 ---
+    // 1. 创建一个代表“绕Z轴旋转180度”的修正矩阵
+    Eigen::Matrix3d correction_matrix;
+    correction_matrix = Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitZ());
+
+    // 2. 将原始旋转矩阵左乘修正矩阵，得到修正后的旋转
+    // pose_loop.R = correction_matrix * pose_loop.R;
+      // --- 构建并发布 PoseWithCovarianceStamped 消息 ---
+    geometry_msgs::PoseWithCovarianceStamped global_pose_msg;
+    // cout<<"global_state.timestamp"<<global_state.timestamp<<endl;
+    global_pose_msg.header.stamp = ros::Time(global_state.timestamp); // 或者使用传感器数据的时间戳
+    global_pose_msg.header.frame_id = "world"; // 例如 "map"
+
+    // 填充位姿
+    global_pose_msg.pose.pose.position.x = pose_loop.t.x();
+    global_pose_msg.pose.pose.position.y = pose_loop.t.y();
+    global_pose_msg.pose.pose.position.z = pose_loop.t.z();
+
+    tf2::Matrix3x3 tf_rot_matrix(
+        pose_loop.R(0,0), pose_loop.R(0,1), pose_loop.R(0,2),
+        pose_loop.R(1,0), pose_loop.R(1,1), pose_loop.R(1,2),
+        pose_loop.R(2,0), pose_loop.R(2,1), pose_loop.R(2,2)
+    );
+    tf2::Quaternion tf_quat;
+    tf_rot_matrix.getRotation(tf_quat);
+    global_pose_msg.pose.pose.orientation = tf2::toMsg(tf_quat.normalized());
+
+    // 填充协方差 (这是一个非常关键的步骤，需要根据您的ICP的可靠性来设置)
+    // 示例：假设一个固定的、对角线上的协方差
+    // 您应该根据ICP的实际表现和匹配质量来调整这些值
+    // 较小的值表示对ICP结果的置信度较高
+    double pos_variance = 0.1 * 0.1; // 例如，位置标准差为 10cm -> 方差 0.01 m^2
+    double rot_variance = (2.0 * M_PI / 180.0) * (2.0 * M_PI / 180.0); // 例如，姿态标准差为 2度 -> 方差 (rad^2)
+
+    // 初始化为0
+    for(int i=0; i<36; ++i) global_pose_msg.pose.covariance[i] = 0.0;
+
+    global_pose_msg.pose.covariance[0] = pos_variance;  // x方差
+    global_pose_msg.pose.covariance[7] = pos_variance;  // y方差
+    global_pose_msg.pose.covariance[14] = pos_variance; // z方差 (如果您的ICP是2D的，z的方差可以设大一些或根据情况)
+
+    global_pose_msg.pose.covariance[21] = rot_variance; // roll方差 (如果2D ICP，roll和pitch方差可以设大)
+    global_pose_msg.pose.covariance[28] = rot_variance; // pitch方差
+    global_pose_msg.pose.covariance[35] = rot_variance; // yaw方差
+
+    // 发布消息
+    global_pose_publisher_.publish(global_pose_msg);
+    // ROS_DEBUG("LoopClosing: Published global pose: x=%.2f, y=%.2f, yaw=%.2f",
+    //           t_icp_result.x(), t_icp_result.y(), std::atan2(R_icp_result(1,0), R_icp_result(0,0)));
+    //  mapdisplay.publishodomPath(global_state.position);
+
+
     Eigen::Vector3d p_error = pre_loop - pose_loop.t;
     double per=p_error.norm();
     if(per<=3)
@@ -295,9 +337,9 @@ Eigen::Matrix4d LoopClosing::icp_pose(std::vector<Eigen::Vector3d>  prevPoints,c
     // 计算运行时间
     std::chrono::duration<double> duration = end - start;
     cout<< "time:"<<duration.count()<<endl;
-   saveTrajectoryToTUM("/data/yhy/localization_trajectory.txt", ekf);
+//    saveTrajectoryToTUM("/data/yhy/localization_trajectory.txt", ekf);
     // saveTrajectoryToTUM("/data/yhy/localization_trajectory.txt", pose_loop);
-    mapdisplay.publishodomPath(ekf.position);
+    // mapdisplay.publishodomPath(global_state.position);
     }
     pre_loop=pose_loop.t;
     
@@ -306,6 +348,7 @@ Eigen::Matrix4d LoopClosing::icp_pose(std::vector<Eigen::Vector3d>  prevPoints,c
     // ekfodometry(state_);
     
     return pose;
+    
 
 }
 
@@ -426,6 +469,7 @@ int LoopClosing::levenshtein(const std::string& s1, const std::string& s2) {
 void LoopClosing::piexl_to_3d(const std::vector<AssociatedPair>&map_point,const std::vector<AssociatedPair>&cur_point)
 {
     std::vector<Eigen::Vector3d> mappoints;
+    std::vector<Eigen::Vector3d> matchpoints;
     std::vector<Eigen::Vector3d> curpoints;
     //  std::vector<Eigen::Vector3d> currvehiclePoints;
     //     std::vector<Eigen::Vector3d> currvehiclePoints_ocr;
@@ -438,8 +482,8 @@ void LoopClosing::piexl_to_3d(const std::vector<AssociatedPair>&map_point,const 
             
             mappoints.push_back(Eigen::Vector3d(pairMap.ocrPoint.x1, pairMap.ocrPoint.y1, 0));
             mappoints.push_back(Eigen::Vector3d(pairMap.ocrPoint.x2, pairMap.ocrPoint.y2, 0));
-            curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.y1)/ 63.15, -(-330 + pairCur.ocrPoint.x1) /64.56, 0));
-            curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.y2)/ 63.15, -(-330 + pairCur.ocrPoint.x2) /64.56, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-330+pairCur.ocrPoint.y1)/ 63.15, (-330 + pairCur.ocrPoint.x1) /64.56, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-330+pairCur.ocrPoint.y2)/ 63.15, (-330 + pairCur.ocrPoint.x2) /64.56, 0));
             // curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.x1)/ 64.56, -(-330 + pairCur.ocrPoint.y1) /63.15, 0));
             // curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.x2)/ 64.56, -(-330 + pairCur.ocrPoint.y2) /63.15, 0));
             // 将 cur_point 的两个 OCR 点压入
@@ -447,10 +491,14 @@ void LoopClosing::piexl_to_3d(const std::vector<AssociatedPair>&map_point,const 
             mappoints.push_back(Eigen::Vector3d(pairMap.spot.x2, pairMap.spot.y2, 0));
             mappoints.push_back(Eigen::Vector3d(pairMap.spot.x3,  pairMap.spot.y3, 0));
             mappoints.push_back(Eigen::Vector3d(pairMap.spot.x4, pairMap.spot.y4, 0));
-            curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.y1)/ 48.99, -(-256 + pairCur.spot.x1) /50.08, 0));
-            curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.y2)/ 48.99, -(-256 + pairCur.spot.x2) /50.08, 0));
-            curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.y3)/ 48.99, -(-256 + pairCur.spot.x3) /50.08, 0));
-            curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.y4)/ 48.99, -(-256 + pairCur.spot.x4) /50.08, 0));
+               matchpoints.push_back(Eigen::Vector3d(pairMap.spot.x1,  pairMap.spot.y1, 0));
+            matchpoints.push_back(Eigen::Vector3d(pairMap.spot.x2, pairMap.spot.y2, 0));
+            matchpoints.push_back(Eigen::Vector3d(pairMap.spot.x3,  pairMap.spot.y3, 0));
+            matchpoints.push_back(Eigen::Vector3d(pairMap.spot.x4, pairMap.spot.y4, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-256+pairCur.spot.y1)/ 48.99, (-256 + pairCur.spot.x1) /50.08, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-256+pairCur.spot.y2)/ 48.99, (-256 + pairCur.spot.x2) /50.08, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-256+pairCur.spot.y3)/ 48.99, (-256 + pairCur.spot.x3) /50.08, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-256+pairCur.spot.y4)/ 48.99, (-256 + pairCur.spot.x4) /50.08, 0));
             //   curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.x1)/ 50.08, -(-256+pairCur.spot.y1)/ 50.08, 0));
             // curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.x2)/ 50.08, -(-256+pairCur.spot.y2)/ 50.08, 0));
             // curpoints.push_back(Eigen::Vector3d((-256+pairCur.spot.x3)/ 50.08, -(-256+pairCur.spot.y3)/ 50.08, 0));
@@ -461,13 +509,13 @@ void LoopClosing::piexl_to_3d(const std::vector<AssociatedPair>&map_point,const 
             mappoints.push_back(Eigen::Vector3d(pairMap.ocrPoint.x2, pairMap.ocrPoint.y2, 0));
             //  curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.x1)/ 64.56, -(-330 + pairCur.ocrPoint.y1) /63.15, 0));
             // curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.x2)/ 64.56, -(-330 + pairCur.ocrPoint.y2) /63.15, 0));
-            curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.y1)/ 63.15, -(-330 + pairCur.ocrPoint.x1) /64.56, 0));
-            curpoints.push_back(Eigen::Vector3d((-330+pairCur.ocrPoint.y2)/ 63.15, -(-330 + pairCur.ocrPoint.x2) /64.56, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-330+pairCur.ocrPoint.y1)/ 63.15, (-330 + pairCur.ocrPoint.x1) /64.56, 0));
+            curpoints.push_back(Eigen::Vector3d(-(-330+pairCur.ocrPoint.y2)/ 63.15, (-330 + pairCur.ocrPoint.x2) /64.56, 0));
         }
     }
     // std::cout<<curpoints.size()<<","<<mappoints.size()<<std::endl;
     // odom.computepose(curpoints, mappoints);
-    mapdisplay.matchdisplay(mappoints);
+    mapdisplay.matchdisplay(matchpoints);
     icp_pose(curpoints,mappoints);
 
 
@@ -475,7 +523,7 @@ void LoopClosing::piexl_to_3d(const std::vector<AssociatedPair>&map_point,const 
 
 
 void LoopClosing::avm_callback1(const sensor_msgs::CompressedImageConstPtr& msg) {
-       cout<<"enteravm"<<endl;
+    //    cout<<"enteravm"<<endl;
     avmseq2 = ++avmseq2; // 获取序列号
      cout<<avmseq2<<endl;
     avm_buffer2[avmseq2] = msg;          // 将消息存入缓冲区
@@ -496,8 +544,9 @@ void LoopClosing::avm_callback1(const sensor_msgs::CompressedImageConstPtr& msg)
 
 void LoopClosing::front_callback1(const sensor_msgs::CompressedImageConstPtr& msg) {
     // uint32_t seq = msg->header.seq; // 获取序列号
+    //  cout<<"fronttime："<< msg->header.stamp<<endl;
     frontseq2 = ++frontseq2;
-     cout<<frontseq2<<endl;
+    //  cout<<frontseq2<<endl;
     front_buffer2[frontseq2] = msg;        // 将消息存入缓冲区
 
     // 检查是否有匹配的 AVM 图像
@@ -537,7 +586,7 @@ void LoopClosing::imageCallback_map(const sensor_msgs::CompressedImageConstPtr& 
         associatedPairs_map.clear();
         AssociatedPair pair;
         pair.ID=mp;
-        cout<<" srv.response.point0_x.size()"<< srv.response.point0_x.size()<<endl;
+        // cout<<" srv.response.point0_x.size()"<< srv.response.point0_x.size()<<endl;
         std::vector<bool> matched_spot_flags(srv.response.point0_x.size(), false); // 标记车位是否已匹配
         std::vector<bool> matched_number_flags(srv.response.ocrpointx1.size(), false); // 标记车位号是否已匹配
         for (size_t i = 0; i < srv.response.point0_x.size(); ++i){
@@ -631,6 +680,8 @@ void LoopClosing::imageCallback_map(const sensor_msgs::CompressedImageConstPtr& 
         if(associatedPairs_map.size()>=2)
         {
             ekf.timestamp= front_msg->header.stamp.toSec();
+            global_state.timestamp= front_msg->header.stamp.toSec();
+            //    cout<<"global_state.timestamp"<< front_msg->header.stamp.toSec()<<endl;
             detectLoop(associatedPairs_map);
         }
         else{
@@ -653,7 +704,7 @@ void LoopClosing::imageCallback_map(const sensor_msgs::CompressedImageConstPtr& 
 }
 
 void LoopClosing::saveTrajectoryToTUM(const std::string& filename, const EKFState& pose) {
-    // file(filename, std::ios::out | std::ios::app);
+    std::ofstream file(filename, std::ios::out | std::ios::app);
     if (!file.is_open()) {
         std::cerr << "Error: Unable to open file " << filename << " for writing." << std::endl;
         return;

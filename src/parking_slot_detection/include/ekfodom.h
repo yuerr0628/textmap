@@ -24,6 +24,9 @@
 #include <sensor_msgs/NavSatFix.h>
 #include"pose.h"
 #include"p3p.h"
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
 // #include"loop_closing.h"
 // #include <GeographicLib/LocalCartesian.hpp>
 
@@ -121,8 +124,8 @@ enum StateNoiseIndex : uint {
 };
 
 struct State {
-    Eigen::Matrix3d R_q;
-    Eigen::Vector3d p;
+    Eigen::Matrix3d R_q; //最终的rq
+    Eigen::Vector3d p;     //里程计位置
     Eigen::Vector3d v;
     Eigen::Vector3d ba;
     Eigen::Vector3d bg;
@@ -141,6 +144,14 @@ public:
     
         std::unordered_map<uint32_t, sensor_msgs::CompressedImageConstPtr> avm_buffer1;
     std::unordered_map<uint32_t, sensor_msgs::CompressedImageConstPtr> front_buffer1;
+ std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> m_front_cam_sub;
+    std::unique_ptr<message_filters::Subscriber<sensor_msgs::Imu>> m_Imu_sub;
+    typedef message_filters::sync_policies::ApproximateTime<
+        sensor_msgs::CompressedImage, 
+        sensor_msgs::Imu
+    > ImuFrontSyncPolicy;
+    std::unique_ptr<message_filters::Synchronizer<ImuFrontSyncPolicy>> m_synchronizer;
+
     Odometry(ros::NodeHandle& nh);
 
     // Odometry();
@@ -183,7 +194,7 @@ public:
     double whl_odom_var,gnss_noise_var,odom_rot_var,odom_tran_var;
     bool IF_GPS_DENY = false;
     bool InitState();
-   void imuCallback_odom(const sensor_msgs::Imu::ConstPtr& imu_msg);
+   void imuCallback_odom(const sensor_msgs::ImuConstPtr& imu_msg);
     // void WheelCallback(const diankong::VehicleFeedbackConstPtr &wheel_msg);
     void WheelCallback(const parking_slot_detection::SpeedFeedbackConstPtr &wheel_msg);
     void GpsCallback(const sensor_msgs::NavSatFixConstPtr &gps_msg);
@@ -200,17 +211,18 @@ public:
     void front_callback(const sensor_msgs::CompressedImageConstPtr& msg);
     void cleanup_buffers(uint32_t current_seq);
     void process_synced_images(const sensor_msgs::CompressedImageConstPtr&avm_msg,const sensor_msgs::CompressedImageConstPtr& front_msg);
-    
+    void syncedCallback(const sensor_msgs::CompressedImageConstPtr& front_cam_msg, const sensor_msgs::ImuConstPtr& imu_msg);
     // void UpdateByGps(GNSSDataPtr gnss_data_ptr);
     // void UpdateByOdom(ODOMDataPtr odom_data_ptr);
-    void publish();
+    void publish_odo();
 
 
 
     void matchpoint(const std::vector<cv::Point2f> & preFrame,const std::vector<cv::Point2f> & currentFrame);
     void piextocamera(const parking_slot_detection::gcn_parking &srv);
     void drawslot(const cv::Mat& image);
-    void drawline( const Eigen::Matrix4d&relative_pose);
+    // void drawline( const Eigen::Matrix4d&relative_pose);
+    void drawline(const VIOODOMData & Rpose);
     void matchframes(const TEXTDATA &ctextdata);
     
         // 从两帧车位角点估计相机的位姿

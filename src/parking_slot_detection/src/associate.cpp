@@ -17,11 +17,16 @@ uint32_t avmseq=-1;
 uint32_t frontseq=-1;
 cv::Mat canvas1(1000, 1000, CV_8UC3, cv::Scalar(255, 255, 255));
 cv::String windowName1 = "slots";
-AssociatedParkingInfo::AssociatedParkingInfo(ros::NodeHandle& nh): vehiclepose(nh) {
+AssociatedParkingInfo::AssociatedParkingInfo(ros::NodeHandle& nh): vehiclepose(nh), ekf_odom(nh) {
     
     // image_sub = nh.subscribe("/driver/fisheye/avm/compressed", 10, &AssociatedParkingInfo::imageCallback,this);
      avmimage_sub = nh.subscribe("/driver/fisheye/avm/compressed", 10, &AssociatedParkingInfo::avm_callback,this);
     frontimage_sub = nh.subscribe("/driver/fisheye/left/compressed", 10, &AssociatedParkingInfo::front_callback,this);
+    front_cam_sub = std::make_unique<message_filters::Subscriber<sensor_msgs::CompressedImage>>(nh, "/driver/fisheye/front/compressed", 50);
+    Imu_map_sub = std::make_unique<message_filters::Subscriber<sensor_msgs::Imu>>(nh, "/Inertial/imu/data", 50);
+    map_synchronizer = std::make_unique<message_filters::Synchronizer<ImuFrontmapSyncPolicy>>(ImuFrontmapSyncPolicy(10), *front_cam_sub, *Imu_map_sub );
+    map_synchronizer->registerCallback(boost::bind(&AssociatedParkingInfo::syncedCallback_map, this, _1, _2));
+    
     
     // client = nh.serviceClient<parking_slot_detection::gcn_parking>("gcn_service");
     client_plate = nh.serviceClient<parking_slot_detection::PlateRecognition>("license_plate_recognition");
@@ -35,18 +40,18 @@ void AssociatedParkingInfo::avm_callback(const sensor_msgs::CompressedImageConst
     //  cout<<avmseq<<endl;
     avm_buffer[avmseq] = msg;          // 将消息存入缓冲区
 
-    // 检查是否有匹配的 front 图像
-    if (front_buffer.count(avmseq)) {
-        // 找到匹配的 front 图像
-        auto front_msg = front_buffer[avmseq];
+    // // 检查是否有匹配的 front 图像
+    // if (front_buffer.count(avmseq)) {
+    //     // 找到匹配的 front 图像
+    //     auto front_msg = front_buffer[avmseq];
 
-        // 移除已匹配的消息
-        front_buffer.erase(avmseq);
-        avm_buffer.erase(avmseq);
+    //     // 移除已匹配的消息
+    //     front_buffer.erase(avmseq);
+    //     avm_buffer.erase(avmseq);
 
-        // 触发后续处理逻辑
-        process_synced_images(msg, front_msg);
-    }
+    //     // 触发后续处理逻辑
+    //     process_synced_images(msg, front_msg);
+    // }
 }
 
 void AssociatedParkingInfo::front_callback(const sensor_msgs::CompressedImageConstPtr& msg) {
@@ -56,7 +61,22 @@ void AssociatedParkingInfo::front_callback(const sensor_msgs::CompressedImageCon
     //  cout<<frontseq<<endl;
     front_buffer[frontseq] = msg;        // 将消息存入缓冲区
 
-    // 检查是否有匹配的 AVM 图像
+    // // 检查是否有匹配的 AVM 图像
+    // if (avm_buffer.count(frontseq)) {
+    //     // 找到匹配的 AVM 图像
+    //     auto avm_msg = avm_buffer[frontseq];
+
+    //     // 移除已匹配的消息
+    //     avm_buffer.erase(frontseq);
+    //     front_buffer.erase(frontseq);
+
+    //     // 触发后续处理逻辑
+    //     process_synced_images(avm_msg, msg);
+    // }
+}
+
+void AssociatedParkingInfo::syncedCallback_map(const sensor_msgs::CompressedImageConstPtr& front_cam_msg, const sensor_msgs::ImuConstPtr& imu_msg) {
+       // 检查是否有匹配的 AVM 图像
     if (avm_buffer.count(frontseq)) {
         // 找到匹配的 AVM 图像
         auto avm_msg = avm_buffer[frontseq];
@@ -66,7 +86,12 @@ void AssociatedParkingInfo::front_callback(const sensor_msgs::CompressedImageCon
         front_buffer.erase(frontseq);
 
         // 触发后续处理逻辑
-        process_synced_images(avm_msg, msg);
+        process_synced_images(avm_msg, front_cam_msg);
+    }
+    else {
+        // 未找到匹配的AVM，可能AVM消息还没到或者丢失了
+        // ROS_WARN("No matching AVM image for front_cam_seq %lu");
+        cout<<"No matching AVM image for front_cam_seq"<<endl;
     }
 }
 
@@ -149,10 +174,10 @@ void AssociatedParkingInfo::HandleDeath(const std::vector<AssociatedPair>& cFram
             // 如果未重新出现，计数加1
             // std::cout<<"map"<<std::endl;
             disappearanceCount[death[i].unmatch_ID]++;
-            if (disappearanceCount[death[i].unmatch_ID] >=20) {
+            if (disappearanceCount[death[i].unmatch_ID] >=5) {
                 AssociatedPair mapSpot = death[i];
                 // 从 death 列表和计数映射中移除
-                // std::cout<<mapSpot.ocrPoint.text<<","<<disappearanceCount[mapSpot.unmatch_ID]<<std::endl;
+                std::cout<<"-----------------:"<<mapSpot.ocrPoint.text<<","<<disappearanceCount[mapSpot.unmatch_ID]<<std::endl;
                 if(death[i].age<=3)
                 {
                         disappearanceCount.erase(mapSpot.unmatch_ID);
@@ -172,8 +197,8 @@ void AssociatedParkingInfo::HandleDeath(const std::vector<AssociatedPair>& cFram
                     
                     display.displaymap(mapSpot);
                     mapassociatedPairs.push_back(mapSpot);
-                    // saveToYAML(mapassociatedPairs,"/data/yhy/map.yaml");
-                    saveToJSON(mapassociatedPairs,"/data/yhy/map20250323new.json");
+                    saveToYAML(mapassociatedPairs,"/data/yhy/map_tj_1.yaml");
+                    // saveToJSON(mapassociatedPairs,"/data/yhy/map250701.json");
                 }
             }
         }
@@ -409,12 +434,136 @@ void AssociatedParkingInfo::matchParkingSpots(const std::vector<AssociatedPair>&
    
 }
 
+// void AssociatedParkingInfo::worldlocationspots(const std::vector<AssociatedPair>& pairspots )
+// {
+//     worldassociatedPairs.clear();
+//     AssociatedPair spotpair;
+//     AssociatedPair pairspot1;
+//         double distanceocrpre;
+    
+//     double centerx,centery;
+ 
+//     for (const auto& pairspot : pairspots){
+//             // std::cout<<"ocr:"<<pairspot.ocrPoint.text<<"id:"<<pairspot.ID<<std::endl;
+//             pairspot1.spot.x1=-256+pairspot.spot.x1;
+//             pairspot1.spot.x2=-256+pairspot.spot.x2;
+//             pairspot1.spot.x3=-256+pairspot.spot.x3;
+//             pairspot1.spot.x4=-256+pairspot.spot.x4;
+//             pairspot1.spot.y1=-256+pairspot.spot.y1;
+//             pairspot1.spot.y2=-256+pairspot.spot.y2;
+//             pairspot1.spot.y3=-256+pairspot.spot.y3;
+//             pairspot1.spot.y4=-256+pairspot.spot.y4;
+//             pairspot1.ocrPoint.x1=-512+pairspot.ocrPoint.x1;
+//             pairspot1.ocrPoint.y1=-512+pairspot.ocrPoint.y1;
+//             pairspot1.ocrPoint.x2=-512+pairspot.ocrPoint.x2;
+//             pairspot1.ocrPoint.y2=-512+pairspot.ocrPoint.y2;
+//         if(pairspot.spot.x1!=0&&!pairspot.ocrPoint.text.empty()){
+//     spotpair.spot.y1=(-(pairspot1.spot.y1)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x1)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x1=(pairspot1.spot.x1)/55.52 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y1)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y2=(-(pairspot1.spot.y2)/54.94 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.x2)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x2=(pairspot1.spot.x2)/55.52 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y2)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y3=(-(pairspot1.spot.y3)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x3)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x3=(pairspot1.spot.x3)/55.52 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y3)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y4=(-(pairspot1.spot.y4)/54.94* cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x4)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x4=(pairspot1.spot.x4)/55.52 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y4)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.y1=(-(pairspot1.ocrPoint.y1)/109.88 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x1)/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.ocrPoint.x1=(pairspot1.ocrPoint.x1)/111.04 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y1)/109.88 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.y2=(-(pairspot1.ocrPoint.y2)/109.88 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x2)/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.ocrPoint.x2=(pairspot1.ocrPoint.x2)/111.04 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y2)/109.88 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+//     spotpair.ID=pairspot.ID;
+//     spotpair.spot.vacant=pairspot.spot.vacant;
+//     spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+//     spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+//     spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
+//    double length=abs(spotpair.spot.y1-spotpair.spot.y2);
+//     double width=abs(spotpair.spot.x1-spotpair.spot.x2);
+//     double lenth=sqrt(length*length+width*width);
+//     // std::cout<<"wolrdpoint:"<<spotpair.spot.y1<<","<<spotpair.spot.x1<<","<<spotpair.spot.y2<<","<<spotpair.spot.x2<<","<<lenth<<endl;
+    
+//                     // 计算车位号和车辆中心距离
+//         centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
+//         centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
+//         distanceocrpre=sqrt(pow(vehiclepose.pose.x - centerx, 2) + pow(vehiclepose.pose.y+2.2725- centery, 2));
+//         spotpair.distanceocr=distanceocrpre;
+//         //  std::cout<< spotpair.distanceocr<<endl;
+//         // if(width>3.5)
+//         worldassociatedPairs.push_back(spotpair);
+//         }
+//      else if(pairspot.spot.x1==0&&!pairspot.ocrPoint.text.empty()){
+//         spotpair.spot.x1=spotpair.spot.y1=0;
+//         spotpair.spot.x2=spotpair.spot.y2=0;
+//         spotpair.spot.x3=spotpair.spot.y3=0;
+//         spotpair.spot.x4=spotpair.spot.y4=0;
+//     spotpair.ocrPoint.y1=(-(pairspot1.ocrPoint.y1)/109.88 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x1)/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.ocrPoint.x1=(pairspot1.ocrPoint.x1)/111.04 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y1)/109.88 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.y2=(-(pairspot1.ocrPoint.y2)/109.88 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x2)/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.ocrPoint.x2=(pairspot1.ocrPoint.x2)/111.04 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y2)/109.88 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+//     spotpair.ID=pairspot.ID;
+//     spotpair.spot.vacant=pairspot.spot.vacant;
+//      spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+//     spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+//     spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
+//     double length=abs(spotpair.spot.y1-spotpair.spot.y4);
+//     double width=abs(spotpair.spot.x1-spotpair.spot.x4);
+//                       // 计算车位号和车辆中心距离
+//         centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
+//         centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
+//         distanceocrpre=sqrt(pow(vehiclepose.pose.x - centerx, 2) + pow(vehiclepose.pose.y+2.2725 - centery, 2));
+//         spotpair.distanceocr=distanceocrpre;
+//         // std::cout<<spotpair.distanceocr<<endl;
+//     // if(width>3.5)
+//         worldassociatedPairs.push_back(spotpair);
+    
+
+//         }
+//        else if(pairspot.spot.x1!=0&&pairspot.ocrPoint.text.empty())
+//         {
+//             // std::cout<<"enter"<<std::endl;
+//     //    std::cout<<pairspot.ocrPoint.text<<endl;
+//     spotpair.spot.y1=(-(pairspot1.spot.y1)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x1)/ 55.52* sin(vehiclepose.pose.yaw) +vehiclepose.pose.y);
+//     spotpair.spot.x1=(pairspot1.spot.x1)/55.52 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y1)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y2=(-(pairspot1.spot.y2)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x2)/55.52 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.y);
+//     spotpair.spot.x2=(pairspot1.spot.x2)/55.52 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y2)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y3=(-(pairspot1.spot.y3)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x3)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x3=(pairspot1.spot.x3)/55.52 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y3)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.spot.y4=(-(pairspot1.spot.y4)/54.94 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x4)/55.52 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+//     spotpair.spot.x4=(pairspot1.spot.x4)/55.52 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y4)/54.94 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
+//     spotpair.ocrPoint.x1=spotpair.ocrPoint.y1=0;
+//     spotpair.ocrPoint.x2=spotpair.ocrPoint.y2=0;
+//     spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+//     spotpair.ID=pairspot.ID;
+//     spotpair.spot.vacant=pairspot.spot.vacant;
+//     spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+//     spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+//     spotpair.ocrPoint.confidence=0;
+//     double length=abs(spotpair.spot.y1-spotpair.spot.y4);
+//     double width=abs(spotpair.spot.x1-spotpair.spot.x4);
+//     spotpair.distanceocr=500;
+//     // if(width>3.5)
+//         worldassociatedPairs.push_back(spotpair);
+//     // worldassociatedPairs.push_back(spotpair);
+//         }
+
+ 
+//     }
+   
+//     display.displayParkingSpots(worldassociatedPairs);
+//      matchParkingSpots(worldassociatedPairs);
+
+    
+ 
+// }
+
 void AssociatedParkingInfo::worldlocationspots(const std::vector<AssociatedPair>& pairspots )
 {
+    // std::cout<<"--------odomp:"<<ekf_odom.state_.p<<std::endl;
+    // std::cout<<"--------gpsp:"<<vehiclepose.pose.x<<","<<vehiclepose.pose.y<<std::endl;
     worldassociatedPairs.clear();
     AssociatedPair spotpair;
     AssociatedPair pairspot1;
-        double distanceocrpre;
+    double distanceocrpre;
     
     double centerx,centery;
  
@@ -424,115 +573,144 @@ void AssociatedParkingInfo::worldlocationspots(const std::vector<AssociatedPair>
             pairspot1.spot.x2=-256+pairspot.spot.x2;
             pairspot1.spot.x3=-256+pairspot.spot.x3;
             pairspot1.spot.x4=-256+pairspot.spot.x4;
-            pairspot1.spot.y1=-256+pairspot.spot.y1;
-            pairspot1.spot.y2=-256+pairspot.spot.y2;
-            pairspot1.spot.y3=-256+pairspot.spot.y3;
-            pairspot1.spot.y4=-256+pairspot.spot.y4;
-            pairspot1.ocrPoint.x1=-330+pairspot.ocrPoint.x1;
-            pairspot1.ocrPoint.y1=-330+pairspot.ocrPoint.y1;
-            pairspot1.ocrPoint.x2=-330+pairspot.ocrPoint.x2;
-            pairspot1.ocrPoint.y2=-330+pairspot.ocrPoint.y2;
+            pairspot1.spot.y1=-319+pairspot.spot.y1;
+            pairspot1.spot.y2=-319+pairspot.spot.y2;
+            pairspot1.spot.y3=-319+pairspot.spot.y3;
+            pairspot1.spot.y4=-319+pairspot.spot.y4;
+            pairspot1.ocrPoint.x1=-512+pairspot.ocrPoint.x1;
+            pairspot1.ocrPoint.y1=-638+pairspot.ocrPoint.y1;
+            pairspot1.ocrPoint.x2=-512+pairspot.ocrPoint.x2;
+            pairspot1.ocrPoint.y2=-638+pairspot.ocrPoint.y2;
         if(pairspot.spot.x1!=0&&!pairspot.ocrPoint.text.empty()){
-    spotpair.spot.y1=(-(pairspot1.spot.y1)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x1)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x1=(pairspot1.spot.x1)/50.08 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y1)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y2=(-(pairspot1.spot.y2)/48.99 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.x2)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x2=(pairspot1.spot.x2)/50.08 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y2)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y3=(-(pairspot1.spot.y3)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x3)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x3=(pairspot1.spot.x3)/50.08 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y3)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y4=(-(pairspot1.spot.y4)/48.99* cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x4)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x4=(pairspot1.spot.x4)/50.08 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y4)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.y1=(-(pairspot1.ocrPoint.y1)/63.15 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x1)/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.ocrPoint.x1=(pairspot1.ocrPoint.x1)/64.56 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y1)/63.15 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.y2=(-(pairspot1.ocrPoint.y2)/63.15 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x2)/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.ocrPoint.x2=(pairspot1.ocrPoint.x2)/64.56 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y2)/63.15 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.text=pairspot.ocrPoint.text;
-    spotpair.ID=pairspot.ID;
-    spotpair.spot.vacant=pairspot.spot.vacant;
-    spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
-    spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
-    spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
-   double length=abs(spotpair.spot.y1-spotpair.spot.y2);
-    double width=abs(spotpair.spot.x1-spotpair.spot.x2);
-    double lenth=sqrt(length*length+width*width);
-    // std::cout<<"wolrdpoint:"<<spotpair.spot.y1<<","<<spotpair.spot.x1<<","<<spotpair.spot.y2<<","<<spotpair.spot.x2<<","<<lenth<<endl;
-    
-                    // 计算车位号和车辆中心距离
-        centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
-        centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
-        distanceocrpre=sqrt(pow(vehiclepose.pose.x - centerx, 2) + pow(vehiclepose.pose.y+2.2725- centery, 2));
-        spotpair.distanceocr=distanceocrpre;
-        //  std::cout<< spotpair.distanceocr<<endl;
-        // if(width>3.5)
-        worldassociatedPairs.push_back(spotpair);
-        }
-     else if(pairspot.spot.x1==0&&!pairspot.ocrPoint.text.empty()){
-        spotpair.spot.x1=spotpair.spot.y1=0;
-        spotpair.spot.x2=spotpair.spot.y2=0;
-        spotpair.spot.x3=spotpair.spot.y3=0;
-        spotpair.spot.x4=spotpair.spot.y4=0;
-    spotpair.ocrPoint.y1=(-(pairspot1.ocrPoint.y1)/63.15 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x1)/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.ocrPoint.x1=(pairspot1.ocrPoint.x1)/64.56 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y1)/63.15 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.y2=(-(pairspot1.ocrPoint.y2)/63.15 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.x2)/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.ocrPoint.x2=(pairspot1.ocrPoint.x2)/64.56 * cos(vehiclepose.pose.yaw) +  (pairspot1.ocrPoint.y2)/63.15 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.text=pairspot.ocrPoint.text;
-    spotpair.ID=pairspot.ID;
-    spotpair.spot.vacant=pairspot.spot.vacant;
-     spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
-    spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
-    spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
-    double length=abs(spotpair.spot.y1-spotpair.spot.y4);
-    double width=abs(spotpair.spot.x1-spotpair.spot.x4);
-                      // 计算车位号和车辆中心距离
-        centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
-        centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
-        distanceocrpre=sqrt(pow(vehiclepose.pose.x - centerx, 2) + pow(vehiclepose.pose.y+2.2725 - centery, 2));
-        spotpair.distanceocr=distanceocrpre;
-        // std::cout<<spotpair.distanceocr<<endl;
-    // if(width>3.5)
-        worldassociatedPairs.push_back(spotpair);
-    
+            // 使用EKF的位姿，使用ekf_odom.state_.R_q旋转矩阵和ekf_odom.state_.p位置向量
+            // Eigen::Vector3d spot_point1((pairspot1.spot.x1)/55.52, (pairspot1.spot.y1)/54.94, 0);
+            Eigen::Vector3d spot_point1(-(pairspot1.spot.y1)/54.94,-(pairspot1.spot.x1)/55.52, 0);
+            // Eigen::Vector3d spot_point1((pairspot1.spot.x1)/55.52,-(pairspot1.spot.y1)/54.94, 0);
+            Eigen::Vector3d world_point1 =  ekf_odom.state_.R_q * spot_point1 + ekf_odom.state_.p;
+            spotpair.spot.x1 = world_point1(0);
+            spotpair.spot.y1 = world_point1(1);
 
-        }
-       else if(pairspot.spot.x1!=0&&pairspot.ocrPoint.text.empty())
-        {
-            // std::cout<<"enter"<<std::endl;
-    //    std::cout<<pairspot.ocrPoint.text<<endl;
-    spotpair.spot.y1=(-(pairspot1.spot.y1)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x1)/ 50.08* sin(vehiclepose.pose.yaw) +vehiclepose.pose.y);
-    spotpair.spot.x1=(pairspot1.spot.x1)/50.08 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y1)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y2=(-(pairspot1.spot.y2)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x2)/50.08 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.y);
-    spotpair.spot.x2=(pairspot1.spot.x2)/50.08 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y2)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y3=(-(pairspot1.spot.y3)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x3)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x3=(pairspot1.spot.x3)/50.08 * cos(vehiclepose.pose.yaw) + (pairspot1.spot.y3)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.spot.y4=(-(pairspot1.spot.y4)/48.99 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.x4)/50.08 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-    spotpair.spot.x4=(pairspot1.spot.x4)/50.08 * cos(vehiclepose.pose.yaw) +  (pairspot1.spot.y4)/48.99 * sin(vehiclepose.pose.yaw) +vehiclepose.pose.x;
-    spotpair.ocrPoint.x1=spotpair.ocrPoint.y1=0;
-    spotpair.ocrPoint.x2=spotpair.ocrPoint.y2=0;
-    spotpair.ocrPoint.text=pairspot.ocrPoint.text;
-    spotpair.ID=pairspot.ID;
-    spotpair.spot.vacant=pairspot.spot.vacant;
-    spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
-    spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
-    spotpair.ocrPoint.confidence=0;
-    double length=abs(spotpair.spot.y1-spotpair.spot.y4);
-    double width=abs(spotpair.spot.x1-spotpair.spot.x4);
-    spotpair.distanceocr=500;
-    // if(width>3.5)
-        worldassociatedPairs.push_back(spotpair);
-    // worldassociatedPairs.push_back(spotpair);
-        }
+            Eigen::Vector3d spot_point2(-(pairspot1.spot.y2)/54.94,-(pairspot1.spot.x2)/55.52, 0);
+            // Eigen::Vector3d spot_point2((pairspot1.spot.x2)/55.52,-(pairspot1.spot.y2)/54.94, 0);
+            Eigen::Vector3d world_point2 = ekf_odom.state_.R_q *  spot_point2 + ekf_odom.state_.p;
+            spotpair.spot.x2 = world_point2(0);
+            spotpair.spot.y2 = world_point2(1);
 
- 
+           Eigen::Vector3d spot_point3(-(pairspot1.spot.y3)/54.94,-(pairspot1.spot.x3)/55.52, 0);
+        // Eigen::Vector3d spot_point3((pairspot1.spot.x3)/55.52,-(pairspot1.spot.y3)/54.94, 0);
+            Eigen::Vector3d world_point3 = ekf_odom.state_.R_q * spot_point3 + ekf_odom.state_.p;
+            spotpair.spot.x3 = world_point3(0);
+            spotpair.spot.y3 = world_point3(1);
+
+           Eigen::Vector3d spot_point4(-(pairspot1.spot.y4)/54.94,-(pairspot1.spot.x4)/55.52, 0);
+        // Eigen::Vector3d spot_point4((pairspot1.spot.x4)/55.52,-(pairspot1.spot.y4)/54.94, 0);
+            Eigen::Vector3d world_point4 = ekf_odom.state_.R_q * spot_point4 + ekf_odom.state_.p;
+            cout<<"state_p:"<<ekf_odom.state_.p(0)<<","<<ekf_odom.state_.p(1)<<","<<ekf_odom.state_.p(2)<<endl;
+            spotpair.spot.x4 = world_point4(0);
+            spotpair.spot.y4 = world_point4(1);
+
+            Eigen::Vector3d ocr_point1( -(pairspot1.ocrPoint.y1)/109.88,-(pairspot1.ocrPoint.x1)/111.04, 0);
+            Eigen::Vector3d world_ocr_point1 =  ekf_odom.state_.R_q * ocr_point1 + ekf_odom.state_.p;
+            spotpair.ocrPoint.x1 = world_ocr_point1(0);
+            spotpair.ocrPoint.y1 = world_ocr_point1(1);
+
+            Eigen::Vector3d ocr_point2(-(pairspot1.ocrPoint.y2)/109.88,-(pairspot1.ocrPoint.x2)/111.04, 0);
+            Eigen::Vector3d world_ocr_point2 =  ekf_odom.state_.R_q * ocr_point2 + ekf_odom.state_.p;
+            spotpair.ocrPoint.x2 = world_ocr_point2(0);
+            spotpair.ocrPoint.y2 = world_ocr_point2(1);
+
+            spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+            spotpair.ID=pairspot.ID;
+            spotpair.spot.vacant=pairspot.spot.vacant;
+            spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+            spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+            spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
+            
+            double length=sqrt(pow(spotpair.spot.y1-spotpair.spot.y2, 2) + pow(spotpair.spot.x1-spotpair.spot.x2, 2));
+            double width=sqrt(pow(spotpair.spot.y3-spotpair.spot.y2, 2) + pow(spotpair.spot.x3-spotpair.spot.x2, 2));
+            
+            // 计算车位号和车辆中心距离
+            centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
+            centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
+            distanceocrpre=sqrt(pow(ekf_odom.state_.p(0) - centerx, 2) + pow(ekf_odom.state_.p(1) - centery, 2));
+            spotpair.distanceocr=distanceocrpre;
+            
+            worldassociatedPairs.push_back(spotpair);
+        }
+        else if(pairspot.spot.x1==0&&!pairspot.ocrPoint.text.empty()){
+            spotpair.spot.x1=spotpair.spot.y1=0;
+            spotpair.spot.x2=spotpair.spot.y2=0;
+            spotpair.spot.x3=spotpair.spot.y3=0;
+            spotpair.spot.x4=spotpair.spot.y4=0;
+            
+            // 仅处理OCR部分
+            Eigen::Vector3d ocr_point1(-(pairspot1.ocrPoint.y1)/109.88, -(pairspot1.ocrPoint.x1)/111.04, 0);
+            Eigen::Vector3d world_ocr_point1 = ekf_odom.state_.R_q * ocr_point1 + ekf_odom.state_.p;
+            spotpair.ocrPoint.x1 = world_ocr_point1(0);
+            spotpair.ocrPoint.y1 = world_ocr_point1(1);
+
+            Eigen::Vector3d ocr_point2(-(pairspot1.ocrPoint.y2)/109.88,-(pairspot1.ocrPoint.x2)/111.04,  0);
+            Eigen::Vector3d world_ocr_point2 = ekf_odom.state_.R_q * ocr_point2 + ekf_odom.state_.p;
+            spotpair.ocrPoint.x2 = world_ocr_point2(0);
+            spotpair.ocrPoint.y2 = world_ocr_point2(1);
+            
+            spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+            spotpair.ID=pairspot.ID;
+            spotpair.spot.vacant=pairspot.spot.vacant;
+            spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+            spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+            spotpair.ocrPoint.confidence=pairspot.ocrPoint.confidence;
+            
+            // 计算车位号和车辆中心距离
+            centery=(spotpair.ocrPoint.y1+spotpair.ocrPoint.y2)/2;
+            centerx=(spotpair.ocrPoint.x1+spotpair.ocrPoint.x2)/2;
+            distanceocrpre=sqrt(pow(ekf_odom.state_.p(0) - centerx, 2) + pow(ekf_odom.state_.p(1) - centery, 2));
+            spotpair.distanceocr=distanceocrpre;
+            
+            worldassociatedPairs.push_back(spotpair);
+        }
+        else if(pairspot.spot.x1!=0&&pairspot.ocrPoint.text.empty()) {
+            // 仅处理车位部分
+            Eigen::Vector3d spot_point1(-(pairspot1.spot.y1)/54.94,-(pairspot1.spot.x1)/55.52,  0);
+            // Eigen::Vector3d spot_point1((pairspot1.spot.x1)/55.52,-(pairspot1.spot.y1)/54.94, 0);
+            Eigen::Vector3d world_point1 = ekf_odom.state_.R_q * spot_point1 + ekf_odom.state_.p;
+            spotpair.spot.x1 = world_point1(0);
+            spotpair.spot.y1 = world_point1(1);
+
+            Eigen::Vector3d spot_point2(-(pairspot1.spot.y2)/54.94,-(pairspot1.spot.x2)/55.52, 0);
+            // Eigen::Vector3d spot_point2((pairspot1.spot.x2)/55.52,-(pairspot1.spot.y2)/54.94, 0);
+            Eigen::Vector3d world_point2 = ekf_odom.state_.R_q * spot_point2 + ekf_odom.state_.p;
+            spotpair.spot.x2 = world_point2(0);
+            spotpair.spot.y2 = world_point2(1);
+
+            Eigen::Vector3d spot_point3( -(pairspot1.spot.y3)/54.94,-(pairspot1.spot.x3)/55.52, 0);
+            // Eigen::Vector3d spot_point3((pairspot1.spot.x3)/55.52,-(pairspot1.spot.y3)/54.94, 0);
+            Eigen::Vector3d world_point3 = ekf_odom.state_.R_q * spot_point3 + ekf_odom.state_.p;
+            spotpair.spot.x3 = world_point3(0);
+            spotpair.spot.y3 = world_point3(1);
+
+            Eigen::Vector3d spot_point4( -(pairspot1.spot.y4)/54.94,-(pairspot1.spot.x4)/55.52, 0);
+            // Eigen::Vector3d spot_point4((pairspot1.spot.x4)/55.52,-(pairspot1.spot.y4)/54.94, 0);
+            Eigen::Vector3d world_point4 = ekf_odom.state_.R_q * spot_point4 + ekf_odom.state_.p;
+            spotpair.spot.x4 = world_point4(0);
+            spotpair.spot.y4 = world_point4(1);
+            
+            spotpair.ocrPoint.x1=spotpair.ocrPoint.y1=0;
+            spotpair.ocrPoint.x2=spotpair.ocrPoint.y2=0;
+            spotpair.ocrPoint.text=pairspot.ocrPoint.text;
+            spotpair.ID=pairspot.ID;
+            spotpair.spot.vacant=pairspot.spot.vacant;
+            spotpair.IF_SPOT_DET=pairspot.IF_SPOT_DET;
+            spotpair.IF_TEXT_DET=pairspot.IF_TEXT_DET;
+            spotpair.ocrPoint.confidence=0;
+            spotpair.distanceocr=500;
+            
+            worldassociatedPairs.push_back(spotpair);
+        }
     }
    
     display.displayParkingSpots(worldassociatedPairs);
-     matchParkingSpots(worldassociatedPairs);
-
-    
- 
-    
-   
-    
-
+    matchParkingSpots(worldassociatedPairs);
 }
 
 
@@ -558,8 +736,8 @@ void AssociatedParkingInfo::associateSpotsAndNumbers(const parking_slot_detectio
                 double point0_y = (srv.response.point0_y[i]+srv.response.point1_y[i])/2;
                 double x1 = (srv.response.ocrpointx1[j]+srv.response.ocrpointx2[j])/2;
                 double y1 = (srv.response.ocrpointy1[j]+srv.response.ocrpointy2[j])/2;
-                double disocr_x=(x1-330)/64.56;double disocr_y=(y1-330)/63.15;
-                double disspot_x=(point0_x-256)/50.08;double disspot_y=(point0_y-256)/48.99;
+                double disocr_x=(x1-512)/111.04;double disocr_y=(y1-512)/109.88;
+                double disspot_x=(point0_x-256)/55.52;double disspot_y=(point0_y-256)/54.94;
                 double distance = sqrt(pow((disocr_x - disspot_x), 2) + pow((disocr_y - disspot_y), 2));
                 if (distance < association_distance) {
                     //  std::cout<<"enter"<<std::endl;
@@ -734,14 +912,14 @@ void AssociatedParkingInfo::process_synced_images(const sensor_msgs::CompressedI
                 Eigen::Vector3d camera_point1;
                 Eigen::Vector3d camera_point2;
                  
-                // camera_point1[1]=(-(srv_plate.response.corners_y1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-                //  camera_point1[0]=(-(srv_plate.response.corners_x1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_y1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
-                //  camera_point2[1]=(-(srv_plate.response.corners_y2[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x2[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-                //  camera_point2[0]=(-(srv_plate.response.corners_x2[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_y2[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
-                    // camera_coords[2][1]=(-(srv_plate.response.corners_y1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-                    //  camera_coords[2][0]=(-(srv_plate.response.corners_y1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
-                    //   camera_coords[3][1]=(-(srv_plate.response.corners_y1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
-                    //    camera_coords[3][0]=(-(srv_plate.response.corners_y1[i])/63.15 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/64.56 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
+                // camera_point1[1]=(-(srv_plate.response.corners_y1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+                //  camera_point1[0]=(-(srv_plate.response.corners_x1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_y1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
+                //  camera_point2[1]=(-(srv_plate.response.corners_y2[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x2[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+                //  camera_point2[0]=(-(srv_plate.response.corners_x2[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_y2[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
+                    // camera_coords[2][1]=(-(srv_plate.response.corners_y1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+                    //  camera_coords[2][0]=(-(srv_plate.response.corners_y1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
+                    //   camera_coords[3][1]=(-(srv_plate.response.corners_y1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.y);
+                    //    camera_coords[3][0]=(-(srv_plate.response.corners_y1[i])/109.88 * cos(vehiclepose.pose.yaw) +  (srv_plate.response.corners_x1[i])/111.04 * sin(vehiclepose.pose.yaw)+vehiclepose.pose.x);
                 // camera_point1[2]=0;
                 // camera_point2[2]=0;
                 
@@ -791,7 +969,12 @@ void AssociatedParkingInfo::process_synced_images(const sensor_msgs::CompressedI
         {
             // std::cout<<"enter"<<std::endl;
             // std::cout<<srv.response.point0_x.size()<<std::endl;
-      
+           double time_image=front_msg->header.stamp.toSec();
+           double time_odom=ekf_odom.state_.time;
+           double time_gps=vehiclepose.pose.timestamp;
+           cout<<"time_gps-time_image: "<<time_gps-time_image<<endl;
+           cout<<"time_odom-time_image: "<<time_odom-time_image<<endl;
+            //  cout<<"gps.pose-ekf.pose: "<<vehiclepose.pose.x-ekf_odom.state_.p(0)<<","<<vehiclepose.pose.y-ekf_odom.state_.p(1)<<endl;
             associateSpotsAndNumbers(srv);
             // drawslotwithnumber(image);
             // 成功接收响应
@@ -809,10 +992,10 @@ void AssociatedParkingInfo::process_synced_images(const sensor_msgs::CompressedI
                 int point3_x = srv.response.point3_x[i];
                 int point3_y = srv.response.point3_y[i];
                 int type = srv.response.types[i];
-                 std::cout<<"length:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/50.08<<std::endl;
-                 std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/48.99<<std::endl;
-                  std::cout<<"length1:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/48.99<<std::endl;
-                 std::cout<<"width1:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/50.08<<std::endl;
+                 std::cout<<"length:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/55.52<<std::endl;
+                 std::cout<<"width:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/54.94<<std::endl;
+                  std::cout<<"length1:"<<(srv.response.point3_x[i]-srv.response.point1_x[i])/54.94<<std::endl;
+                 std::cout<<"width1:"<<(srv.response.point0_y[i]-srv.response.point1_y[i])/55.52<<std::endl;
                 std::cout<<"spotnumber:"<<srv.response.point0_y.size()<<std::endl;
                 cv::circle(image_vis, cv::Point(point0_x, point0_y), 3, color, 2);
                 cv::circle(image_vis, cv::Point(point1_x, point1_y), 3, color, 2);
@@ -829,7 +1012,7 @@ void AssociatedParkingInfo::process_synced_images(const sensor_msgs::CompressedI
                 double y2 = srv.response.ocrpointy2[i];
                 string text=srv.response.texts[i];
                 // std::cout<<"text:"<<srv.response.texts[i]<<"con:"<<srv.response.confidence[i]<<std::endl;
-                // cout<<"text:"<<(srv.response.ocrpointx1[i]-330)/64.56<<","<<(srv.response.ocrpointy1[i]-330)/63.15<<endl;
+                // cout<<"text:"<<(srv.response.ocrpointx1[i]-512)/111.04<<","<<(srv.response.ocrpointy1[i]-512)/109.88<<endl;
 
                 // std::cout<<"textnum:"<<srv.response.texts.size()<<std::endl;
                 cv::Scalar rectangleColor(0, 255, 0); // 绿色，BGR颜色空间
@@ -862,49 +1045,49 @@ void AssociatedParkingInfo::process_synced_images(const sensor_msgs::CompressedI
 
 
 
-// void AssociatedParkingInfo::saveToYAML(const std::vector<AssociatedPair>& pairs, const std::string& filename) {
-//   YAML::Emitter out;
-//     out << YAML::BeginSeq;
-//     for (const auto& pair : pairs) {
-//         out << YAML::BeginMap;
-//         out << YAML::Key << "ID" << YAML::Value << pair.ID;
-//         out << YAML::Key << "unmatch_ID" << YAML::Value << pair.unmatch_ID;
-//         out << YAML::Key << "age" << YAML::Value << pair.age;
-//         out << YAML::Key << "distanceocr" << YAML::Value << pair.distanceocr;
-//         out << YAML::Key << "IF_TEXT_DET" << YAML::Value << pair.IF_TEXT_DET;
-//         out << YAML::Key << "IF_SPOT_DET" << YAML::Value << pair.IF_SPOT_DET;
+void AssociatedParkingInfo::saveToYAML(const std::vector<AssociatedPair>& pairs, const std::string& filename) {
+  YAML::Emitter out;
+    out << YAML::BeginSeq;
+    for (const auto& pair : pairs) {
+        out << YAML::BeginMap;
+        out << YAML::Key << "ID" << YAML::Value << pair.ID;
+        out << YAML::Key << "unmatch_ID" << YAML::Value << pair.unmatch_ID;
+        out << YAML::Key << "age" << YAML::Value << pair.age;
+        out << YAML::Key << "distanceocr" << YAML::Value << pair.distanceocr;
+        out << YAML::Key << "IF_TEXT_DET" << YAML::Value << pair.IF_TEXT_DET;
+        out << YAML::Key << "IF_SPOT_DET" << YAML::Value << pair.IF_SPOT_DET;
 
-//         // 序列化 ParkingSpot
-//         out << YAML::Key << "ParkingSpot" << YAML::Value << YAML::BeginMap;
-//         out << YAML::Key << "x1" << YAML::Value << pair.spot.x1;
-//         out << YAML::Key << "y1" << YAML::Value << pair.spot.y1;
-//         out << YAML::Key << "x2" << YAML::Value << pair.spot.x2;
-//         out << YAML::Key << "y2" << YAML::Value << pair.spot.y2;
-//         out << YAML::Key << "x3" << YAML::Value << pair.spot.x3;
-//         out << YAML::Key << "y3" << YAML::Value << pair.spot.y3;
-//         out << YAML::Key << "x4" << YAML::Value << pair.spot.x4;
-//         out << YAML::Key << "y4" << YAML::Value << pair.spot.y4;
-//         out << YAML::Key << "vacant" << YAML::Value << pair.spot.vacant;
-//         out << YAML::Key << "vacant_update" << YAML::Value << pair.spot.vacant_update;
-//         out << YAML::EndMap;
+        // 序列化 ParkingSpot
+        out << YAML::Key << "ParkingSpot" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "x1" << YAML::Value << pair.spot.x1;
+        out << YAML::Key << "y1" << YAML::Value << pair.spot.y1;
+        out << YAML::Key << "x2" << YAML::Value << pair.spot.x2;
+        out << YAML::Key << "y2" << YAML::Value << pair.spot.y2;
+        out << YAML::Key << "x3" << YAML::Value << pair.spot.x3;
+        out << YAML::Key << "y3" << YAML::Value << pair.spot.y3;
+        out << YAML::Key << "x4" << YAML::Value << pair.spot.x4;
+        out << YAML::Key << "y4" << YAML::Value << pair.spot.y4;
+        out << YAML::Key << "vacant" << YAML::Value << pair.spot.vacant;
+        out << YAML::Key << "vacant_update" << YAML::Value << pair.spot.vacant_update;
+        out << YAML::EndMap;
 
-//         // 序列化 OCRPoint
-//         out << YAML::Key << "OCRPoint" << YAML::Value << YAML::BeginMap;
-//         out << YAML::Key << "text" << YAML::Value << pair.ocrPoint.text;
-//         out << YAML::Key << "confidence" << YAML::Value << pair.ocrPoint.confidence;
-//         out << YAML::Key << "x1" << YAML::Value << pair.ocrPoint.x1;
-//         out << YAML::Key << "y1" << YAML::Value << pair.ocrPoint.y1;
-//         out << YAML::Key << "x2" << YAML::Value << pair.ocrPoint.x2;
-//         out << YAML::Key << "y2" << YAML::Value << pair.ocrPoint.y2;
-//         out << YAML::EndMap;
+        // 序列化 OCRPoint
+        out << YAML::Key << "OCRPoint" << YAML::Value << YAML::BeginMap;
+        out << YAML::Key << "text" << YAML::Value << pair.ocrPoint.text;
+        out << YAML::Key << "confidence" << YAML::Value << pair.ocrPoint.confidence;
+        out << YAML::Key << "x1" << YAML::Value << pair.ocrPoint.x1;
+        out << YAML::Key << "y1" << YAML::Value << pair.ocrPoint.y1;
+        out << YAML::Key << "x2" << YAML::Value << pair.ocrPoint.x2;
+        out << YAML::Key << "y2" << YAML::Value << pair.ocrPoint.y2;
+        out << YAML::EndMap;
 
-//         out << YAML::EndMap;
-//     }
-//     out << YAML::EndSeq;
+        out << YAML::EndMap;
+    }
+    out << YAML::EndSeq;
 
-//     std::ofstream fout(filename);
-//     fout << out.c_str();
-// }
+    std::ofstream fout(filename);
+    fout << out.c_str();
+}
 
 void AssociatedParkingInfo::saveToJSON(const std::vector<AssociatedPair>& pairs, const std::string& filename) {
     json j_array = json::array();

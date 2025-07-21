@@ -120,6 +120,7 @@ void VehiclePose::gpsCallback(const sensor_msgs::NavSatFix::ConstPtr& gps_msg) {
         pose.x=y;
         pose.y=x;
         pose.z=z;
+        pose.timestamp=gps_msg->header.stamp.toSec();
         // std::cout<<"pose.x"<<pose.x<<"pose.y:"<<pose.y<<endl;
             double y1 = sin(delta_long) * cos(radLat2);
     double x1 = cos(radLat1) * sin(radLat2) - sin(radLat1) * cos(radLat2) * cos(delta_long);

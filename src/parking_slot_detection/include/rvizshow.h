@@ -53,7 +53,8 @@ public:
    void displayPlate(const std::vector<LicensePlate>& plates);
     void displaymap(const AssociatedPair& mapPairs);
     void publishPosePath(const PoseData& new_pose);
-    void publishodomPath(const Eigen::Vector3d & position);
+    // void publishodomPath(const Eigen::Vector3d & position);
+    void publishodomPath(const VIOODOMData & vio_data);
     void publishekfodom(const Eigen::VectorXd &state);
     void publishekfodom_new(const State &state_);
     void visualizeMapPoints(const std::vector<AssociatedPair>& mapPoints);

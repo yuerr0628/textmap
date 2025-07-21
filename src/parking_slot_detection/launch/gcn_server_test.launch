@@ -7,8 +7,9 @@
         <param name="image_path" type="str" value="$(find parking_slot_detection)/data/test.png"/>
     </node> -->
     <node name="client_node" pkg="parking_slot_detection" type="client_test_node" output="screen">
+   
         <!-- <param name="image_path" type="str" value="$(find parking_slot_detection)/data/test.png"/> -->
     </node>
-    <node pkg="rosbag" type="play" name="playe" args="--clock  --rate 1  /data/yhy/2025-03-23-13-52-47.bag  --start 15"/>  
+    <node pkg="rosbag" type="play" name="playe" args="--clock  --rate 1  /data/yhy/tianjie1_1.bag  "/>  
      <!-- </node> -->
 </launch>

@@ -19,6 +19,7 @@
 #include"../include/Hungarian.h"
 #include <fstream>
 #include <yaml-cpp/yaml.h>
+#include "ekfodom.h"  // 添加这一行
 // using json = nlohmann::json;
 using std::string;
 using namespace std;
@@ -56,6 +57,14 @@ public:
     P3P p3p1;
     std::unordered_map<uint32_t, sensor_msgs::CompressedImageConstPtr> avm_buffer;
     std::unordered_map<uint32_t, sensor_msgs::CompressedImageConstPtr> front_buffer;
+    std::unique_ptr<message_filters::Subscriber<sensor_msgs::CompressedImage>> front_cam_sub;
+    std::unique_ptr<message_filters::Subscriber<sensor_msgs::Imu>> Imu_map_sub;
+    typedef message_filters::sync_policies::ApproximateTime<
+        sensor_msgs::CompressedImage, 
+        sensor_msgs::Imu
+    > ImuFrontmapSyncPolicy;
+    std::unique_ptr<message_filters::Synchronizer<ImuFrontmapSyncPolicy>> map_synchronizer;
+
     AssociatedParkingInfo(ros::NodeHandle& nh);
      ros::Subscriber avmimage_sub;
     ros::Subscriber frontimage_sub;
@@ -64,6 +73,7 @@ public:
     ros::ServiceClient client;
     ros::ServiceClient client_plate;
     VehiclePose vehiclepose;
+    Odometry ekf_odom;
     void associateSpotsAndNumbers(const parking_slot_detection::gcn_parking &srv);
     void drawslotwithnumber(const cv::Mat& image);
     void addFrameAssociatedPairs(const std::vector<AssociatedPair>& framePairs);
@@ -77,6 +87,7 @@ public:
     void selectocr(const std::vector<AssociatedPair>& pairspots );
     void saveToYAML(const std::vector<AssociatedPair>& pairs, const std::string& filename);
     void saveToJSON(const std::vector<AssociatedPair>& pairs, const std::string& filename);
+    void syncedCallback_map(const sensor_msgs::CompressedImageConstPtr& front_cam_msg, const sensor_msgs::ImuConstPtr& imu_msg);
     // void Datafuse(std::vector<int> Assignment);
     std::vector<AssociatedPair> preFrame;
     // 存储所有帧的关联结果

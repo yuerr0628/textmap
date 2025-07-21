@@ -1,0 +1,15 @@
+<launch>
+  <!-- 定义三个局部地图文件以及输出文件路径为参数 -->
+  <arg name="output_file"   default="/data/yhy/ocr/ocrmap/global_map_testloop.json" />
+  <arg name="map1"          default="/data/yhy/ocr/ocrmap/map0723_testseg_5.json"       />
+  <arg name="map2"          default="/data/yhy/ocr/ocrmap/map0723_testseg_6.json"       />
+  <arg name="map3"          default="/data/yhy/ocr/ocrmap/map0723_testseg_loop1.json"       />
+
+  <!-- 把这些参数拼接到 node 的 args 里 -->
+  <node pkg="parking_slot_detection"
+        type="client_test_node"
+        name="client_node"
+        output="screen"
+        args="$(arg output_file) $(arg map1) $(arg map2) $(arg map3)" >
+  </node>
+</launch>

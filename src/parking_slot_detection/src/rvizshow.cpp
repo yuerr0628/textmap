@@ -7,13 +7,14 @@ int spotMarker_id = 0;
 void RvizDisplay::RvizDisplay_init(ros::NodeHandle& nh){
     // 初始化ROS发布者和订阅者
     path_pub = nh.advertise<nav_msgs::Path>("vehicle_trajectory", 10);
-    odom_pub = nh.advertise<nav_msgs::Path>("odom_trajectory", 10);
+    // odom_pub = nh.advertise<nav_msgs::Path>("odom_trajectory", 10);
+    odom_pub = nh.advertise<nav_msgs::Odometry>("odom_trajectory", 10);
     ekfodom_pub = nh.advertise<nav_msgs::Path>("ekfodom_trajectory", 10);
     slots_pub = nh.advertise<visualization_msgs::MarkerArray>("parking_spots", 10);
     plates_pub = nh.advertise<visualization_msgs::MarkerArray>("plates", 10);
     map_pub = nh.advertise<visualization_msgs::Marker>("parking_map", 10);
     ekfpath_new_pub = nh.advertise<nav_msgs::Path>("/ekf_path", 10);
-    ekfodom_new_pub = nh.advertise<nav_msgs::Odometry>("/ekf_odom", 10);
+    ekfodom_new_pub = nh.advertise<nav_msgs::Odometry>("/ekf_odom", 10);  //里程计信息
     localizationmap=nh.advertise<visualization_msgs::MarkerArray>("localization_map", 1000);
     camera_pub = nh.advertise<visualization_msgs::Marker>("camera_marker", 10);
     match_pub = nh.advertise<visualization_msgs::Marker>("matched_points", 100);
@@ -94,42 +95,56 @@ void RvizDisplay::publishPosePath(const PoseData& pose_data) {
             // marker_pub.publish(marker_array);
 }
 
-void RvizDisplay::publishodomPath(const Eigen::Vector3d & position)
+void RvizDisplay::publishodomPath(const VIOODOMData & vio_data)
 {
-     int marker_id = 0;
-    odompath_msg.header.stamp = ros::Time::now();
-    odompath_msg.header.frame_id = "world";
-    odompose_stamped.pose.position.x = position(0);
-    odompose_stamped.pose.position.y = position(1);
-    odompose_stamped.pose.position.z = position(2);
-    odompath_msg.poses.push_back(odompose_stamped);
-    odom_pub.publish(odompath_msg);
+    //  int marker_id = 0;
+    // odompath_msg.header.stamp = ros::Time::now();
+    // odompath_msg.header.frame_id = "world";
+    // odompose_stamped.pose.position.x = position(0);
+    // odompose_stamped.pose.position.y = position(1);
+    // odompose_stamped.pose.position.z = position(2);
+    // odompath_msg.poses.push_back(odompose_stamped);
+    // odom_pub.publish(odompath_msg);
+    // --- 发布 Odometry 消息 ---
+        nav_msgs::Odometry odom_msg;
+        odom_msg.header.stamp = ros::Time::now();
+        odom_msg.header.frame_id = "world";      // 世界坐标系
+        // odom_msg.child_frame_id = "base_link"; // 机器人/相机自身的坐标系
 
-        // 创建相机小方块
-            visualization_msgs::Marker camera_marker;
-            camera_marker.header.frame_id = "world";
-            camera_marker.header.stamp = ros::Time::now();
-            camera_marker.ns = "camera";
-            camera_marker.id = marker_id++;
-            camera_marker.type = visualization_msgs::Marker::CUBE;
-            camera_marker.action = visualization_msgs::Marker::ADD;
-            camera_marker.pose.position.x = position(0);
-            camera_marker.pose.position.y = position(1);
-            camera_marker.pose.position.z = position(2);
-            Eigen::Quaterniond quat(Matrix3d::Identity());
-            camera_marker.pose.orientation.x = quat.x();
-            camera_marker.pose.orientation.y = quat.y();
-            camera_marker.pose.orientation.z = quat.z();
-            camera_marker.pose.orientation.w = quat.w();
-            camera_marker.scale.x = 1;  // 小方块尺寸
-            camera_marker.scale.y = 1;
-            camera_marker.scale.z = 1;
-            camera_marker.color.r = 1.0f;
-            camera_marker.color.g = 0.0f;
-            camera_marker.color.b = 0.0f;
-            camera_marker.color.a = 1.0;
-            camera_marker.lifetime = ros::Duration(0);// 模拟实时更新
-            camera_pub.publish(camera_marker);
+        // 直接使用 VIO 数据填充位姿信息
+        odom_msg.pose.pose = vio_data.pose;
+
+        // 里程计消息还包含速度信息，如果VIO不提供，可以填零
+        odom_msg.twist.twist.linear.x = 0;
+        odom_msg.twist.twist.angular.z = 0;
+        
+        // 发布消息
+        odom_pub.publish(odom_msg);
+   // // 创建相机小方块
+        //     visualization_msgs::Marker camera_marker;
+        //     camera_marker.header.frame_id = "world";
+        //     camera_marker.header.stamp = ros::Time::now();
+        //     camera_marker.ns = "camera";
+        //     camera_marker.id = marker_id++;
+        //     camera_marker.type = visualization_msgs::Marker::CUBE;
+        //     camera_marker.action = visualization_msgs::Marker::ADD;
+        //     camera_marker.pose.position.x = position(0);
+        //     camera_marker.pose.position.y = position(1);
+        //     camera_marker.pose.position.z = position(2);
+        //     Eigen::Quaterniond quat(Matrix3d::Identity());
+        //     camera_marker.pose.orientation.x = quat.x();
+        //     camera_marker.pose.orientation.y = quat.y();
+        //     camera_marker.pose.orientation.z = quat.z();
+        //     camera_marker.pose.orientation.w = quat.w();
+        //     camera_marker.scale.x = 1;  // 小方块尺寸
+        //     camera_marker.scale.y = 1;
+        //     camera_marker.scale.z = 1;
+        //     camera_marker.color.r = 1.0f;
+        //     camera_marker.color.g = 0.0f;
+        //     camera_marker.color.b = 0.0f;
+        //     camera_marker.color.a = 1.0;
+        //     camera_marker.lifetime = ros::Duration(0);// 模拟实时更新
+        //     camera_pub.publish(camera_marker);
             // marker_pub.publish(arrow_marker);
 
 }
@@ -153,6 +168,7 @@ void RvizDisplay::publishekfodom(const Eigen::VectorXd &state)
 void RvizDisplay::publishekfodom_new(const State &state_)
 {
         double time = state_.time;
+        // cout<<"state_.time"<<state_.time<<endl;
     Eigen::Vector3d position = state_.p;
     Eigen::Vector3d velocity = state_.v;
 
@@ -236,6 +252,32 @@ void RvizDisplay::publishekfodom_new(const State &state_)
     //               << state_.p[0] << " " << state_.p[1] << " " << state_.p[2] << " "
     //               << state_q.x() << " " << state_q.y() << " " << state_q.z() << " " << state_q.w()
     //               << std::endl;
+            // 创建相机小方块
+            visualization_msgs::Marker camera_marker;
+            camera_marker.header.frame_id = "world";
+            camera_marker.header.stamp = ros::Time::now();
+            camera_marker.ns = "camera";
+            // camera_marker.id = marker_id++;
+            camera_marker.type = visualization_msgs::Marker::CUBE;
+            camera_marker.action = visualization_msgs::Marker::ADD;
+            camera_marker.pose.position.x = state_.p[0];
+            camera_marker.pose.position.y = state_.p[1];
+            camera_marker.pose.position.z = state_.p[2];
+            Eigen::Quaterniond quat(Matrix3d::Identity());
+            camera_marker.pose.orientation.x = quat.x();
+            camera_marker.pose.orientation.y = quat.y();
+            camera_marker.pose.orientation.z = quat.z();
+            camera_marker.pose.orientation.w = quat.w();
+            camera_marker.scale.x = 1;  // 小方块尺寸
+            camera_marker.scale.y = 1;
+            camera_marker.scale.z = 1;
+            camera_marker.color.r = 1.0f;
+            camera_marker.color.g = 0.0f;
+            camera_marker.color.b = 0.0f;
+            camera_marker.color.a = 1.0;
+            camera_marker.lifetime = ros::Duration(0);// 模拟实时更新
+            camera_pub.publish(camera_marker);
+    
     ekfodom_new_msg.header.stamp = ros::Time::now();
     ekfodom_new_msg.header.frame_id = "world";
     geometry_msgs::PoseStamped ekfodom_new_stamped;
@@ -604,17 +646,17 @@ void RvizDisplay::visualizeMapPoints(const std::vector<AssociatedPair>& mapPoint
         spotMarker.points.push_back(point3);
         spotMarker.points.push_back(point1); // 闭合多边形，返回第一个点
 
-        // 设置颜色和大小
-        if(pair.spot.vacant==1){
-        spotMarker.color.r = 1.0f; // 红色
-        spotMarker.color.g = 0.0f; // 绿色
-        spotMarker.color.b = 0.0f; // 蓝色
-        spotMarker.color.a = 1.0f; // 完全不透明
-        spotMarker.scale.x = 0.1; // 线宽
-        spotMarker.lifetime = ros::Duration(0);
-        markerArray.markers.push_back(spotMarker);
-        }
-        else{
+        // // 设置颜色和大小
+        // if(pair.spot.vacant==1){
+        // spotMarker.color.r = .0f; // 红色
+        // spotMarker.color.g = 0.0f; // 绿色
+        // spotMarker.color.b = 0.0f; // 蓝色
+        // spotMarker.color.a = 1.0f; // 完全不透明
+        // spotMarker.scale.x = 0.1; // 线宽
+        // spotMarker.lifetime = ros::Duration(0);
+        // markerArray.markers.push_back(spotMarker);
+        // }
+        // else{
 
         spotMarker.color.r = 0.0f; // 红色
         spotMarker.color.g = 1.0f; // 绿色
@@ -623,7 +665,7 @@ void RvizDisplay::visualizeMapPoints(const std::vector<AssociatedPair>& mapPoint
         spotMarker.scale.x = 0.1; // 线宽
         spotMarker.lifetime = ros::Duration(0);
         markerArray.markers.push_back(spotMarker);
-        }
+        
 
         markerArray.markers.push_back(spotMarker);
 
@@ -642,46 +684,46 @@ void RvizDisplay::visualizeMapPoints(const std::vector<AssociatedPair>& mapPoint
         // ocrMarker.points.push_back(tf::pointToMsg(tf::Vector3(pair.ocrPoint.x1, pair.ocrPoint.y2, 0)));
         // ocrMarker.points.push_back(spotMarker.points[0]); // 闭合多边形
         // 为车位号边框设置点坐标
-        geometry_msgs::Point point11;
-        point11.x = pair.ocrPoint.x1;
-        point11.y = pair.ocrPoint.y1;
-        point11.z = 0; // 如果是二维情况，z坐标通常设置为0
+        // geometry_msgs::Point point11;
+        // point11.x = pair.ocrPoint.x1;
+        // point11.y = pair.ocrPoint.y1;
+        // point11.z = 0; // 如果是二维情况，z坐标通常设置为0
 
-        geometry_msgs::Point point12;
-        point12.x = pair.ocrPoint.x2;
-        point12.y = pair.ocrPoint.y1;
-        point12.z = 0;
+        // geometry_msgs::Point point12;
+        // point12.x = pair.ocrPoint.x2;
+        // point12.y = pair.ocrPoint.y1;
+        // point12.z = 0;
 
-        geometry_msgs::Point point13;
-        point13.x = pair.ocrPoint.x2;
-        point13.y = pair.ocrPoint.y2;
-        point13.z = 0;
+        // geometry_msgs::Point point13;
+        // point13.x = pair.ocrPoint.x2;
+        // point13.y = pair.ocrPoint.y2;
+        // point13.z = 0;
 
-        geometry_msgs::Point point14;
-        point14.x = pair.ocrPoint.x1;
-        point14.y = pair.ocrPoint.y2;
-        point14.z = 0;
+        // geometry_msgs::Point point14;
+        // point14.x = pair.ocrPoint.x1;
+        // point14.y = pair.ocrPoint.y2;
+        // point14.z = 0;
 
-        // 添加点以闭合多边形（返回第一个点）
-        ocrMarker.points.push_back(point11);
-        ocrMarker.points.push_back(point12);
-        ocrMarker.points.push_back(point13);
-        ocrMarker.points.push_back(point14);
-        ocrMarker.points.push_back(point11); // 闭合边框
-               // 设置颜色和大小
-        ocrMarker.color.r = 1.0f;
-        ocrMarker.color.g = 0.0f;
-        ocrMarker.color.b = 0.0f;
-        ocrMarker.color.a = 1.0f;
-        ocrMarker.scale.x = 0.1;
-        ocrMarker.lifetime = ros::Duration(0);
-        markerArray.markers.push_back(ocrMarker);
+        // // 添加点以闭合多边形（返回第一个点）
+        // ocrMarker.points.push_back(point11);
+        // ocrMarker.points.push_back(point12);
+        // ocrMarker.points.push_back(point13);
+        // ocrMarker.points.push_back(point14);
+        // ocrMarker.points.push_back(point11); // 闭合边框
+        //        // 设置颜色和大小
+        // ocrMarker.color.r = 1.0f;
+        // ocrMarker.color.g = 0.0f;
+        // ocrMarker.color.b = 0.0f;
+        // ocrMarker.color.a = 1.0f;
+        // ocrMarker.scale.x = 0.1;
+        // ocrMarker.lifetime = ros::Duration(0);
+        // markerArray.markers.push_back(ocrMarker);
       
        
         // 将车位号作为文本显示
         visualization_msgs::Marker textMarker;
-        double centerX = (pair.ocrPoint.x1 + pair.ocrPoint.x2) / 2.0;
-        double centerY = (pair.ocrPoint.y1 + pair.ocrPoint.y2) / 2.0;
+        double centerX = (pair.spot.x1 + pair.spot.x3) / 2.0;
+        double centerY = (pair.spot.y1 + pair.spot.y2) / 2.0;
         geometry_msgs::Point pose_center;
         pose_center.x = centerX;
         pose_center.y = centerY;
@@ -692,7 +734,7 @@ void RvizDisplay::visualizeMapPoints(const std::vector<AssociatedPair>& mapPoint
         textMarker.action = visualization_msgs::Marker::ADD;
         textMarker.pose.position = pose_center;
         textMarker.text = pair.ocrPoint.text;
-        textMarker.scale.z = 1.0; // 文本大小
+        textMarker.scale.z = 4.0; // 文本大小
                 // 设置文本颜色和大小
         textMarker.color.r = 1.0f;
         textMarker.color.g = 1.0f;

@@ -126,13 +126,13 @@ void P3P::P3PComputePoses(const std::vector<Point3D>& worldpts3D, const std::vec
         mu0 * mu2 + mv0 * mv2 + mk0 * mk2,
         mu0 * mu1 + mv0 * mv1 + mk0 * mk1
     };
-    cout<<"cosine="<<cosines[0]<<","<<cosines[1]<<","<<cosines[2]<<endl;
+    // cout<<"cosine="<<cosines[0]<<","<<cosines[1]<<","<<cosines[2]<<endl;
 
 
         //吴消元法求解PA，PB，PC的值，有四组解；
     double lengths[4][3];
     int n = solve_for_lengths(lengths, distances, cosines);
-    cout<<"N="<<n<<endl;
+    // cout<<"N="<<n<<endl;
     
 
 

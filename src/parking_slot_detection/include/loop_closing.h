@@ -13,6 +13,11 @@
 #include"associate.h"
 #include"rvizshow.h"
 #include"ekfodom.h"
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h> 
+// #include "ekf_ros_node.h"
 
 
 struct EKFState {
@@ -49,6 +54,8 @@ struct EKFState {
 class LoopClosing {
 public:
     EKFState ekf;
+    EKFState global_state;
+    // EKFNode ekf_node;
        ros::Subscriber avmimage_sub1;
     ros::Subscriber frontimage_sub1;
             std::unordered_map<uint32_t, sensor_msgs::CompressedImageConstPtr> avm_buffer2;
@@ -92,6 +99,8 @@ public:
              const Eigen::MatrixXd &Q);
              void update(const Eigen::Vector3d &measured_p, const Eigen::Quaterniond &measured_q, 
             const Eigen::MatrixXd &R);
+     ros::Publisher global_pose_publisher_;
+    std::string map_frame_id_ = "world"; // 定义地图坐标系ID，应与EKF期望的一致
 
 };
 

@@ -3,6 +3,8 @@ project(parking_slot_detection)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -45,6 +47,7 @@ find_package(OpenCV 3 REQUIRED COMPONENTS core imgcodecs imgproc calib3d)
 find_package(Eigen3 3.3 REQUIRED)
 find_package (GeographicLib REQUIRED)
 find_package(yaml-cpp REQUIRED)
+find_package(g2o REQUIRED)
 
 catkin_package(
 #  INCLUDE_DIRS include
@@ -62,6 +65,8 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
+  ${G2O_INCLUDE_DIRS}
 )
 
 # add_executable(client_test_node
@@ -78,6 +83,12 @@ add_executable(client_test_node
   src/ekfodom.cpp
   src/loop_closing.cpp
   src/p3p.cpp
+  src/map_stitcher.cpp
+  src/json_loader.cpp
+  src/ekf_fuser_3d.cpp
+  src/ekf_fusion_node.cpp
+  # src/ekf_localization_3d.cpp
+  # src/ekf_ros_node.cpp
 )
 
 target_link_libraries(client_test_node
@@ -86,6 +97,10 @@ target_link_libraries(client_test_node
   Eigen3::Eigen
   ${OpenCV_LIBS}
   ${GeographicLib_LIBRARIES}
+  g2o_core
+  g2o_solver_eigen
+  g2o_stuff
+  g2o_types_slam2d
 )
 
 add_dependencies(client_test_node  parking_slot_detection_generate_messages_cpp)
