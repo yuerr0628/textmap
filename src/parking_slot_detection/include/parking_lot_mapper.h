@@ -1,39 +1,47 @@
 #ifndef PARKING_LOT_MAPPER_H
 #define PARKING_LOT_MAPPER_H
 
-#include "parking_types.h"
 #include "Hungarian.h"
+#include "parking_types.h"
 #include <vector>
-#include <map>
-
 
 class ParkingLotMapper {
 public:
-    // 配置参数
     struct Config {
-        double association_threshold = 0.8;
+        double association_threshold = 2.0;
+        double text_gate_cost = 0.35;
+        double geometry_gate = 2.5;
+        double text_cost_weight = 0.55;
+        double geometry_cost_weight = 0.45;
+        double view_distance_weight = 0.08;
         int C_frame_discard_threshold = 20;
-        int C_match_stable_threshold = 5;
-        int C_unobserved_finalize_threshold = 10;
-        double ocr_cost_weight_s = 0.5; // 文本代价权重
-        double ocr_cost_weight_g = 0.5; // 几何代价权重
+        int C_match_stable_threshold = 4;
+        int C_unobserved_finalize_threshold = 8;
     };
 
-    ParkingLotMapper(const Config& config);
-    void update(const std::vector<MapSpot>& current_frame_spots, const VehiclePose& current_vehicle_pose);
+    explicit ParkingLotMapper(const Config& config = Config());
+
+    void update(const std::vector<MapSpot>& current_frame_spots,
+                const VehiclePose& current_vehicle_pose);
     const std::vector<MapSpot>& getFinalMap() const;
+    const std::vector<MapSpot>& getTrackedMap() const;
 
 private:
     Config m_config;
     int m_next_unique_id = 0;
-
-    // 内部状态：正在追踪的所有车位
     std::vector<MapSpot> m_tracked_spots;
-    // 最终生成的稳定地图
     std::vector<MapSpot> m_final_map;
 
+    void mergeSpot(MapSpot& tracked, const MapSpot& observed,
+                   const VehiclePose& current_vehicle_pose);
+    void updateTextVotes(MapSpot& tracked, const OcrResult& ocr,
+                         const VehiclePose& current_vehicle_pose);
+    void refreshBestText(MapSpot& spot);
     void manageLifecycle();
-    double calculateOcrCost(const OcrResult& ocr, const VehiclePose& pose);
+    double calculateAssociationCost(const MapSpot& tracked,
+                                    const MapSpot& observed) const;
+    double calculateOcrCost(const OcrResult& ocr,
+                            const VehiclePose& pose) const;
 };
 
-#endif // PARKING_LOT_MAPPER_H
+#endif

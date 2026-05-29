@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>textmap_reproduction</name>
+  <version>0.0.1</version>
+  <description>Reproduction package for single-vehicle text mapping, crowdsourced fusion, and localization.</description>
+
+  <maintainer email="codex@example.com">Codex</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>roscpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>cv_bridge</build_depend>
+  <build_depend>image_transport</build_depend>
+  <build_depend>message_filters</build_depend>
+  <build_depend>parking_slot_detection</build_depend>
+  <build_depend>g2o</build_depend>
+  <build_depend>libcurl-dev</build_depend>
+
+  <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
+  <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>cv_bridge</build_export_depend>
+  <build_export_depend>image_transport</build_export_depend>
+  <build_export_depend>message_filters</build_export_depend>
+  <build_export_depend>parking_slot_detection</build_export_depend>
+  <build_export_depend>g2o</build_export_depend>
+  <build_export_depend>libcurl-dev</build_export_depend>
+
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>image_transport</exec_depend>
+  <exec_depend>message_filters</exec_depend>
+  <exec_depend>parking_slot_detection</exec_depend>
+  <exec_depend>g2o</exec_depend>
+  <exec_depend>libcurl4</exec_depend>
+</package>

@@ -1,0 +1,20 @@
+<launch>
+  <arg name="avm_topic" default="/driver/fisheye/avm/compressed" />
+  <arg name="front_topic" default="/driver/fisheye/front/compressed" />
+  <arg name="gps_topic" default="/Inertial/gps/fix" />
+  <arg name="imu_topic" default="/Inertial/imu/data" />
+  <arg name="output_path" default="/tmp/single_vehicle_text_map.json" />
+  <arg name="save_every_n_frames" default="20" />
+
+  <node pkg="textmap_reproduction"
+        type="single_vehicle_mapping_node"
+        name="single_vehicle_mapping_node"
+        output="screen">
+    <param name="avm_topic" value="$(arg avm_topic)" />
+    <param name="front_topic" value="$(arg front_topic)" />
+    <param name="gps_topic" value="$(arg gps_topic)" />
+    <param name="imu_topic" value="$(arg imu_topic)" />
+    <param name="output_path" value="$(arg output_path)" />
+    <param name="save_every_n_frames" value="$(arg save_every_n_frames)" />
+  </node>
+</launch>
